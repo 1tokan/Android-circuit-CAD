@@ -14,6 +14,14 @@ Androidで動く電子回路・PCB設計CAD（PWA）。最終目標は、LCSCの
 | JSON取込・書出 | 部品ライブラリを `pocket-eda-library` 形式でやり取り |
 | 手動登録・編集 | 名称・種別・値・メーカー・型番・LCSC品番・パッケージ・フットプリント（内蔵 or 独自JSON）・ピン→パッド対応・データシート・JLCPCB区分・価格・在庫・電気的仕様 |
 | LCSC/JLCPCBへのリンク | 部品詳細から商品ページを開いて価格・在庫・品番を確認 |
+| **オンライン検索（jlcsearch）** | 申請不要。部品画面の「オンライン検索」で、型番・LCSC品番・値から JLCPCB 部品を検索し、LCSC品番・価格・在庫・Basic/Extended区分を取得して端末のライブラリに保存 |
+
+### オンライン検索（jlcsearch）について
+- [jlcsearch](https://docs.tscircuit.com/web-apis/jlcsearch-api) は tscircuit が公開しているコミュニティAPI（認証不要）で、KiCad の JLCPCB プラグインと同じく yaqwsx/jlcparts の部品データを元にしています。**LCSC公式ではありません**
+- 送るのは検索語だけ。呼び出しは0.7秒以上空け、同じ検索は10分キャッシュ
+- 保存済みの部品を検索結果から保存し直すと、利用者が決めた種別・フットプリント・ピン対応は残し、価格・在庫・区分だけ更新
+- つながらないときはエラーを表示し、内蔵部品・CSV取込で作業を続けられる
+- スマホのブラウザから直接つながらない（CORSで拒否される）場合は、Cloudflare Workers に中継を置いて「設定」でURLを指定（[docs/jlcsearch-relay.md](docs/jlcsearch-relay.md)）
 
 - 検索: 名称・メーカー型番・LCSC品番・パッケージ・値・電気的仕様。値の表記ゆれを吸収（`0.1uF` = `100nF`、`10KΩ` = `10k`）。種別・JLCPCB区分・在庫ありで絞り込み
 - 部品データはシンボルとフットプリントを別々に持ち、**ピン番号↔パッド番号の対応**を保持。対応の誤り（パッドが無い・存在しないパッド・1パッドに複数ピン）を検出
@@ -73,11 +81,11 @@ Androidで動く電子回路・PCB設計CAD（PWA）。最終目標は、LCSCの
 ## テスト
 
 ```bash
-npm test                               # 単体テスト（49件: データモデル・自動保存・表示変換・接続計算・編集操作・履歴・フットプリント・部品・取込・ネットリスト）
+npm test                               # 単体テスト（56件: データモデル・自動保存・表示変換・接続計算・編集操作・履歴・フットプリント・部品・取込・ネットリスト）
 python3 -m http.server 8765 &          # 別ターミナルでも可
 node tests/e2e.mjs                     # 保存まわりの実ブラウザテスト（16件）
 node tests/e2e-schematic.mjs           # 回路図エディタの実ブラウザテスト（24件、タッチ操作とマウス操作）
-node tests/e2e-library.mjs             # 部品ライブラリ・取込・ネットリストの実ブラウザテスト（16件）
+node tests/e2e-library.mjs             # 部品ライブラリ・取込・ネットリスト・オンライン検索の実ブラウザテスト（20件、通信はテスト内で差し替え）
 ```
 
 E2EはPlaywrightを使います（`npm i -D playwright`。スクリプト冒頭の import パスと `executablePath` は環境に合わせて変更してください）。
@@ -105,6 +113,7 @@ js/library/footprints.js  フットプリント定義（シンボルとは独立
 js/library/parts.js       部品データのスキーマ・検証・検索・ピン↔パッド対応・内蔵部品
 js/library/importer.js    CSV/JSON の取込・書出（列名の表記ゆれ吸収）
 js/library/library.js     内蔵＋ユーザー部品（IndexedDB）の統合
+js/library/jlcsearch.js   オンライン部品検索（jlcsearch）
 js/library/view.js        「部品」画面
 js/netlist/netlist.js     ネットリスト生成（パッド単位）・検査・書出
 docs/ROADMAP.md           技術選定と開発ロードマップ

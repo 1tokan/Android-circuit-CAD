@@ -27,8 +27,13 @@ export function createPartsView(ctx) {
         <label class="pv-chk"><input type="checkbox" id="pv-stock"> 在庫あり</label>
       </div>
       <div class="pv-assign" id="pv-assign" hidden></div>
+      <div class="pv-online">
+        <button type="button" class="btn" id="pv-online-btn">オンライン検索（jlcsearch）</button>
+        <button type="button" class="chip" id="pv-online-cfg" aria-label="オンライン検索の設定">設定</button>
+      </div>
       <div class="pv-count" id="pv-count"></div>
     </div>
+    <section class="pv-online-res" id="pv-online-res" hidden></section>
     <ul class="pv-list" id="pv-list"></ul>
     <input type="file" id="pv-file" accept=".csv,.tsv,.txt,.json,text/csv,application/json" hidden>`;
 
@@ -39,6 +44,13 @@ export function createPartsView(ctx) {
   $('#pv-jlc', root).onchange = (e) => { st.jlcType = e.target.value; renderList(); };
   $('#pv-stock', root).onchange = (e) => { st.inStock = e.target.checked; renderList(); };
   $('#pv-file', root).onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) await importFile(f); };
+  $('#pv-online-btn', root).onclick = () => onlineSearch();
+  $('#pv-online-cfg', root).onclick = () => onlineSettings();
+  $('#pv-online-res', root).addEventListener('click', (e) => {
+    if (e.target.closest('[data-close]')) { $('#pv-online-res', root).hidden = true; return; }
+    const li = e.target.closest('[data-idx]');
+    if (li && !e.target.closest('a')) showDetail(st.online[Number(li.dataset.idx)], { online: true });
+  });
   listEl.addEventListener('click', (e) => {
     const more = e.target.closest('[data-more]');
     if (more) { st.limit += 200; renderList(); return; }
@@ -116,11 +128,12 @@ export function createPartsView(ctx) {
     return { passive: 'パッシブ', input: '入力', output: '出力', bidirectional: '双方向', power_in: '電源入力', power_out: '電源出力', open_collector: 'オープンコレクタ', nc: '未接続' }[t] || t;
   }
 
-  async function showDetail(id) {
-    const p = ctx.lib.get(id);
+  async function showDetail(idOrPart, { online = false } = {}) {
+    const p = typeof idOrPart === 'string' ? ctx.lib.get(idOrPart) : idOrPart;
     if (!p) return;
+    const saved = online ? ctx.lib.get(p.id) : p;
     const fp = getFootprint(p.footprint);
-    const builtin = ctx.lib.isBuiltin(p.id);
+    const builtin = !online && ctx.lib.isBuiltin(p.id);
     const t = ctx.assignTarget();
     const kv = (k, v) => (v === '' || v === null || v === undefined ? '' : `<div class="kv"><span>${esc(k)}</span><b>${v}</b></div>`);
     const links = [
@@ -140,7 +153,28 @@ export function createPartsView(ctx) {
       <h4>シンボルとフットプリント（${esc(fp?.id || p.footprint || '未設定')}${fp && !fp.verified ? ' <span class="badge planned">寸法未照合</span>' : ''}）</h4>
       <div class="pv-previews">${symbolPreviewSVG(p.kind, { pinCount: p.symbol.pinCount, pinNames: p.symbol.pinNames })}${footprintSVG(fp)}</div>
       <h4>ピン ↔ パッド対応</h4>${pinTable(p)}
+      ${online ? `<p class="note">jlcsearch（非公式のコミュニティAPI）から取得した情報です。価格・在庫は${esc(String(p.updatedAt).slice(0, 16).replace('T', ' '))}時点。${saved && saved.source !== 'jlcsearch' ? '保存済みの部品なので、保存すると価格・在庫・区分だけを更新します（種別・フットプリント・ピン対応は今のまま）。' : 'シンボル種別とフットプリントは推定なので、保存後に「編集」で確認してください。'}</p>` : ''}
     </div>`;
+    if (online) {
+      const t2 = ctx.assignTarget();
+      const r = await ctx.ui.ask(p.name, html, [
+        { label: '閉じる', value: '' }, { label: saved ? '保存済み（更新）' : 'ライブラリに保存', value: 'save' },
+        t2 ? { label: `保存して ${t2.ref} に割り当て`, value: 'assign', cls: 'primary' } : { label: '保存して回路図に配置', value: 'place', cls: 'primary' },
+      ]);
+      if (!r) return;
+      // 保存済みの部品は、利用者が決めた内容（種別・フットプリント・ピン対応・名称など）を残し、
+      // 価格・在庫・区分・データシート・日付だけをオンラインの情報で更新する
+      const merged = saved && saved.source !== 'jlcsearch'
+        ? { ...saved, price: p.price, stock: p.stock, jlc: p.jlc, datasheet: p.datasheet || saved.datasheet, updatedAt: p.updatedAt, lcscVerified: true, manufacturer: saved.manufacturer || p.manufacturer }
+        : p;
+      const [stored] = await ctx.lib.upsert([merged]);
+      renderList();
+      renderOnline();
+      if (r === 'save') ctx.ui.toast(`「${stored.name}」をライブラリに保存しました`);
+      if (r === 'place') ctx.onPlace(stored);
+      if (r === 'assign') ctx.onAssign(stored);
+      return;
+    }
     const buttons = [{ label: '閉じる', value: '' }];
     if (!builtin) buttons.push({ label: '削除', value: 'del', cls: 'danger' });
     buttons.push({ label: builtin ? 'コピーして編集' : '編集', value: 'edit' });
@@ -227,6 +261,64 @@ export function createPartsView(ctx) {
     } catch (e) {
       ctx.ui.toast(e.message, true);
     }
+  }
+
+  // ---------------- オンライン検索（jlcsearch） ----------------
+  st.online = [];
+  st.onlineState = null; // null | 'loading' | {error} | 'done'
+
+  function renderOnline() {
+    const el = $('#pv-online-res', root);
+    if (!st.onlineState) { el.hidden = true; return; }
+    el.hidden = false;
+    const head = `<div class="pv-online-head"><b>オンライン検索</b><span class="note">jlcsearch・非公式</span><button type="button" class="chip" data-close>閉じる</button></div>`;
+    if (st.onlineState === 'loading') { el.innerHTML = head + '<p class="note">検索中…</p>'; return; }
+    if (st.onlineState.error) {
+      const e = st.onlineState.error;
+      el.innerHTML = head + `<p class="err">${esc(e.message)}</p>` +
+        (e.kind === 'network' ? '<p class="note">jlcsearch にブラウザから直接つながらない場合は、「設定」で中継URL（自分の Cloudflare Workers など、docs/jlcsearch-relay.md 参照）を指定できます。内蔵部品とCSV取込はこのまま使えます。</p>' : '');
+      return;
+    }
+    if (!st.online.length) { el.innerHTML = head + '<p class="note">見つかりませんでした。型番やLCSC品番、「10k 0603」のような値で試してください。</p>'; return; }
+    el.innerHTML = head + `<ul class="pv-list">${st.online.map((p, i) => `
+      <li class="pv-item online" data-idx="${i}">
+        <div class="pv-row1"><b>${esc(p.name)}</b>${ctx.lib.get(p.id) ? '<span class="badge ready">保存済み</span>' : ''}</div>
+        <div class="pv-row2">${esc([p.manufacturer, p.mpn].filter(Boolean).join(' · ') || p.description)}</div>
+        <div class="pv-row3">${lcscBadge(p)} ${badge(p)} <span>${esc(p.package || '-')}</span>
+          ${priceText(p) ? `<span>${priceText(p)}</span>` : ''}${p.stock !== null ? `<span>在庫 ${p.stock.toLocaleString()}</span>` : ''}</div>
+      </li>`).join('')}</ul>`;
+  }
+
+  async function onlineSearch() {
+    const q = $('#pv-q', root).value.trim();
+    if (!q) { ctx.ui.toast('検索語（型番・LCSC品番・値など）を入力してください'); $('#pv-q', root).focus(); return; }
+    // 入力直後に押された場合も、ローカル一覧を同じ検索語にそろえる
+    clearTimeout(timer);
+    st.q = q;
+    renderList();
+    st.onlineState = 'loading';
+    renderOnline();
+    try {
+      const r = await ctx.online.search(q, { limit: 30 });
+      st.online = r.parts;
+      st.onlineState = 'done';
+    } catch (e) {
+      st.online = [];
+      st.onlineState = { error: e };
+    }
+    renderOnline();
+  }
+
+  async function onlineSettings() {
+    const cur = ctx.online.base;
+    const r = await ctx.ui.ask('オンライン検索の設定', `<p class="note">通常は変更不要です。ブラウザから jlcsearch に直接つながらない場合だけ、中継URLを指定します。</p>
+      <label class="field"><span>接続先URL</span><input type="text" name="base" value="${esc(cur)}" inputmode="url"></label>`,
+    [{ label: 'キャンセル', value: '' }, { label: '既定に戻す', value: 'reset' }, { label: '保存', value: 'ok', cls: 'primary' }]);
+    if (!r) return;
+    const v = r === 'reset' ? '' : $('#dialog-body [name="base"]').value.trim();
+    if (v && !/^https:\/\/[^\s]+$/.test(v)) { ctx.ui.toast('https:// で始まるURLを指定してください', true); return; }
+    await ctx.setOnlineBase(v);
+    ctx.ui.toast(`接続先: ${ctx.online.base}`);
   }
 
   // ---------------- 取込・書き出し ----------------

@@ -267,7 +267,80 @@ await step('タブレット: 部品画面の表示', async () => {
   await tab.close();
 });
 
-await step('コンソールエラーなし', async () => { assert.deepEqual(errors, []); });
+// ---- オンライン検索（jlcsearch）。通信はテスト内で差し替える ----
+const LDO = { lcsc: 6186, mfr: 'AMS1117-3.3', package: 'SOT-223', description: '1A 3.3V Linear Voltage Regulators (LDO) SOT-223', stock: 123456, price: 0.06, is_basic: true, is_preferred: false, category: 'Power Management ICs', subcategory: 'Linear Voltage Regulators (LDO)', datasheet: 'https://example.com/ams1117.pdf' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
+const seenUrls = [];
+
+await step('オンライン検索: 結果一覧に LCSC品番・Basic・在庫が出る', async () => {
+  await page.route('https://jlcsearch.tscircuit.com/**', (route) => { seenUrls.push(route.request().url()); route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ components: [LDO] }) }); });
+  await ws('parts');
+  await page.locator('#pv-q').fill('AMS1117');
+  await page.locator('#pv-online-btn').click();
+  await page.waitForSelector('#pv-online-res .pv-item');
+  const t = await page.locator('#pv-online-res').textContent();
+  assert.match(t, /C6186/);
+  assert.match(t, /Basic/);
+  assert.match(t, /在庫 123,456/);
+  assert.match(seenUrls[0], /\/api\/search\?q=AMS1117&limit=30&full=true$/);
+  assert.match(await page.locator('#pv-count').textContent(), /^2件ヒット/, 'ローカル一覧も同じ検索語で絞り込まれる（内蔵とCSV取込のAMS1117）');
+  await page.screenshot({ path: `${OUT}/parts-online-phone.png` });
+});
+
+await step('オンライン検索: 詳細→「保存して回路図に配置」でライブラリ保存と配置', async () => {
+  await page.locator('#pv-online-res .pv-item').first().click();
+  await page.waitForSelector('#dialog[open]');
+  const body = await page.locator('#dialog-body').textContent();
+  assert.match(body, /jlcsearch/);
+  assert.match(body, /保存済みの部品なので/, 'CSVで取込済みの C6186');
+  await page.screenshot({ path: `${OUT}/parts-online-detail-phone.png` });
+  await page.locator('#dialog-actions button[value="place"]').click();
+  await page.waitForSelector('#ws-nav button[data-ws="schematic"][aria-current="page"]');
+  await tapWorld(20, 10);
+  const c = (await sheet()).components.at(-1);
+  assert.equal(c.props.lcsc, 'C6186');
+  assert.equal(c.props.footprint, 'SOT-223-3_TabPin2');
+  const saved = await page.evaluate(() => window.pocketEDA.state.lib.get('lcsc:C6186'));
+  assert.equal(saved.stock, 123456, '在庫はオンラインの値に更新');
+  assert.equal(saved.source, 'import:jlc.csv', '取込元はそのまま（種別・フットプリントを保持）');
+  assert.equal(saved.datasheet, 'https://example.com/ams1117.pdf');
+});
+
+await step('オンライン検索: つながらないときはエラーと代替手段を表示（ローカル検索はそのまま）', async () => {
+  await page.unroute('https://jlcsearch.tscircuit.com/**');
+  await page.route('https://jlcsearch.tscircuit.com/**', (route) => route.abort('failed'));
+  await ws('parts');
+  await page.locator('#pv-q').fill('SS34');
+  await page.locator('#pv-online-btn').click();
+  await page.waitForSelector('#pv-online-res .err');
+  const t = await page.locator('#pv-online-res').textContent();
+  assert.match(t, /接続できません/);
+  assert.match(t, /中継URL/);
+  assert.ok(await page.locator('#pv-list .pv-item').count() >= 1, 'ローカル検索結果は出ている');
+});
+
+await step('オンライン検索: 設定で中継URLに切り替え（再読込後も維持）', async () => {
+  const relayUrls = [];
+  await page.route('https://relay.example.workers.dev/**', (route) => { relayUrls.push(route.request().url()); route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ components: [LDO] }) }); });
+  await page.locator('#pv-online-cfg').click();
+  await page.waitForSelector('#dialog[open]');
+  await page.locator('#dialog-body [name="base"]').fill('https://relay.example.workers.dev');
+  await page.locator('#dialog-actions button[value="ok"]').click();
+  await page.waitForFunction(() => window.pocketEDA.state.online.base === 'https://relay.example.workers.dev');
+  await page.reload();
+  await page.waitForSelector('html[data-ready="1"]');
+  assert.equal(await page.evaluate(() => window.pocketEDA.state.online.base), 'https://relay.example.workers.dev');
+  await ws('parts');
+  await page.locator('#pv-q').fill('C6186');
+  await page.locator('#pv-online-btn').click();
+  await page.waitForSelector('#pv-online-res .pv-item');
+  assert.match(relayUrls[0], /^https:\/\/relay\.example\.workers\.dev\/components\/list\.json\?search=C6186&full=true$/);
+  assert.match(await page.locator('#pv-online-res').textContent(), /保存済み/);
+});
+
+await step('コンソールエラーなし（通信遮断テストの読み込み失敗ログは除く）', async () => {
+  assert.deepEqual(errors.filter((e) => !/net::ERR_FAILED|Failed to load resource/.test(e)), []);
+});
 
 await browser.close();
 const ng = results.filter((r) => r[0] === 'NG');

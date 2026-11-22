@@ -11,11 +11,12 @@ import { History } from './core/history.js';
 import { createSchematicEditor } from './schematic/editor.js';
 import { createLibrary } from './library/library.js';
 import { createPartsView } from './library/view.js';
+import { createJlcsearch } from './library/jlcsearch.js';
 import { displayValue } from './library/parts.js';
 import { generateNetlist, netlistStatus, formatNetlistText } from './netlist/netlist.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 
 const state = {
   project: null,
@@ -25,6 +26,7 @@ const state = {
   history: null,
   editor: null,
   lib: createLibrary(),
+  online: createJlcsearch(),
   partsView: null,
   assign: null, // 部品データの割り当て先 {key, ref}
 };
@@ -576,6 +578,8 @@ async function boot() {
   state.partsView = createPartsView({
     root: $('#parts-view'),
     lib: state.lib,
+    online: state.online,
+    setOnlineBase: async (v) => { state.online.setBase(v); await store.setSetting('jlcsearchBase', v || null); },
     ui: { toast, ask, download },
     assignTarget: () => state.assign,
     cancelAssign: () => { state.assign = null; },
@@ -605,6 +609,8 @@ async function boot() {
   }
   store.requestPersistence();
   try { await state.lib.load(); } catch (e) { toast('部品ライブラリを読み込めません: ' + e.message, true); }
+  const jb = await store.getSetting('jlcsearchBase');
+  if (jb) state.online.setBase(jb);
 
   const recovered = await recoverPending();
   if (recovered) await store.setSetting('lastProjectId', recovered);
