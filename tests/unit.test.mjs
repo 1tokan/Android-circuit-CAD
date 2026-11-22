@@ -130,8 +130,8 @@ test('Viewport: 倍率は上下限内', () => {
 
 test('未実装モジュールは ready と表示されない', () => {
   const ready = MODULES.filter((m) => m.status === 'ready').map((m) => m.id);
-  assert.deepEqual(ready, ['project'], '第1段階で ready はプロジェクト管理のみ');
-  for (const ws of WORKSPACES) assert.equal(workspaceStatus(ws), 'planned', ws.id);
+  assert.deepEqual(ready, ['project', 'schematic'], '第2段階で ready はプロジェクト管理と回路図エディタのみ');
+  for (const ws of WORKSPACES) assert.equal(workspaceStatus(ws), ws.id === 'schematic' ? 'partial' : 'planned', ws.id);
 });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -55,6 +55,7 @@
         </g>
       </svg>
       <div class="stage-overlay" id="stage-overlay"></div>
+      <div class="ctxbar" id="ctxbar"></div>
       <div class="zoom-ctl">
         <button class="icon-btn small" id="btn-zoom-in" aria-label="拡大">＋</button>
         <button class="icon-btn small" id="btn-zoom-fit" aria-label="全体表示">⤢</button>
@@ -65,6 +66,7 @@
 
     <!-- タブレット: 右プロパティパネル -->
     <aside class="side-panel" id="side-panel">
+      <div id="sel-info" class="sel-info"></div>
       <h2>モジュール状況</h2>
       <ul id="module-status" class="module-status"></ul>
     </aside>
@@ -88,9 +90,21 @@
     <ul class="project-list" id="project-list"></ul>
   </section>
 
+  <!-- 部品一覧（下からのシート） -->
+  <section class="picker" id="picker" hidden aria-label="部品一覧">
+    <div class="picker-head">
+      <h2>部品を選ぶ</h2>
+      <span class="hint">タップで選んで配置／キャンバスへドラッグ</span>
+      <button class="icon-btn" id="picker-close" aria-label="閉じる">✕</button>
+    </div>
+    <div class="picker-grid" id="picker-grid"></div>
+  </section>
+
   <!-- メニュー -->
   <div class="menu" id="menu" hidden role="menu">
     <button role="menuitem" data-act="save" id="btn-save">今すぐ保存</button>
+    <button role="menuitem" data-act="annotate">部品番号を振り直す</button>
+    <button role="menuitem" data-act="netlist-preview">接続一覧（確認用）</button>
     <button role="menuitem" data-act="export">JSONで書き出し</button>
     <button role="menuitem" data-act="duplicate">複製</button>
     <button role="menuitem" data-act="backups">保存履歴から復元</button>

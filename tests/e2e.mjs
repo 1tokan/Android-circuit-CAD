@@ -48,7 +48,8 @@ await step('スマホ縦画面: 上部・タブ・キャンバス・下部ツー
   await page.screenshot({ path: `${OUT}/phone-portrait.png` });
 });
 
-await step('未実装の作業領域は「未実装」と表示し、ツールは無効', async () => {
+await step('未実装の作業領域(PCB・出力)は「未実装」と表示し、ツールは無効', async () => {
+  await page.locator('#ws-nav button[data-ws="pcb"]').click();
   assert.ok(await page.locator('#stage-overlay').isVisible());
   assert.match(await page.locator('#stage-overlay').textContent(), /未実装/);
   assert.equal(await page.locator('#toolbar .tool:not([disabled])').count(), 0);
@@ -56,6 +57,8 @@ await step('未実装の作業領域は「未実装」と表示し、ツール�
   assert.match(await page.locator('#stage-overlay').textContent(), /Gerber/);
   assert.equal(await page.locator('#ws-nav button[aria-current="page"]').getAttribute('data-ws'), 'output');
   await page.locator('#ws-nav button[data-ws="schematic"]').click();
+  assert.ok(!(await page.locator('#stage-overlay').isVisible()), '回路図はキャンバスを塞がない');
+  assert.ok(await page.locator('#toolbar .tool:not([disabled])').count() >= 8);
 });
 
 await step('名前変更→自動保存→再読込で復元', async () => {
@@ -147,7 +150,7 @@ await step('プロジェクト削除（履歴も削除）', async () => {
   await page.locator('#btn-drawer-close').click();
 });
 
-await step('ホイールズーム・ドラッグでパン', async () => {
+await step('ホイールズーム・中ボタンドラッグでパン', async () => {
   const s0 = await page.evaluate(() => window.pocketEDA.state.vp.scale);
   await page.mouse.move(195, 400);
   await page.mouse.wheel(0, -300);
@@ -155,7 +158,7 @@ await step('ホイールズーム・ドラッグでパン', async () => {
   const s1 = await page.evaluate(() => window.pocketEDA.state.vp.scale);
   assert.ok(s1 > s0, `${s0}→${s1}`);
   const x0 = await page.evaluate(() => window.pocketEDA.state.vp.x);
-  await page.mouse.down(); await page.mouse.move(250, 420, { steps: 5 }); await page.mouse.up();
+  await page.mouse.down({ button: 'middle' }); await page.mouse.move(250, 420, { steps: 5 }); await page.mouse.up({ button: 'middle' });
   const x1 = await page.evaluate(() => window.pocketEDA.state.vp.x);
   assert.ok(x1 < x0, 'パン');
 });

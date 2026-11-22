@@ -1,7 +1,5 @@
 // キャンバスの表示変換（パン・ズーム）とジェスチャー判定。
-// 1本指: パン（第2段階で「選択ツール時は選択、空白ドラッグでパン」に拡張）
-// 2本指: ピンチズーム＋パン。2本目が触れた瞬間に1本指操作をキャンセルし、誤選択を防ぐ。
-// マウスホイール: カーソル位置を中心にズーム。
+// ジェスチャーの詳細は attachGestures のコメント参照。
 
 export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 40;
@@ -39,49 +37,81 @@ export class Viewport {
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 
 /**
- * Pointer Events でパン/ピンチを処理する。
- * onTap(worldPoint) は「動かさずに離した1本指」でだけ呼ぶ（ズーム操作と区別）。
+ * Pointer Events のジェスチャー判定。
+ *  - 1本指/マウスで動かさずに離す → onTap
+ *  - 動かし始め → onDragStart(world, info) が true を返せばドラッグ（部品移動・範囲選択・配線）、
+ *    false ならパン。マウス中ボタン・右ボタンは常にパン
+ *  - タッチで長押し(450ms)してから動かす → onDragStart(..., {longPress:true})（範囲選択用）
+ *    長押しして動かさずに離す → onLongPress
+ *  - 2本目の指が触れたら1本指の操作をキャンセル(onDragCancel)してピンチズームに切替（誤操作防止）
+ *  - マウスのボタンなし移動 → onHover
  */
-export function attachGestures(el, vp, { onChange = () => {}, onTap = () => {}, tapSlop = 8 } = {}) {
+export function attachGestures(el, vp, h = {}) {
+  const H = {
+    onChange: () => {}, onTap: () => {}, onDragStart: () => false, onDragMove: () => {},
+    onDragEnd: () => {}, onDragCancel: () => {}, onLongPress: () => {}, onHover: () => {}, ...h,
+  };
+  const tapSlop = h.tapSlop ?? 8;
   const pts = new Map();
-  let mode = 'idle'; // idle | maybeTap | pan | pinch
-  let start = null;
-  let pinch = null;
+  let mode = 'idle'; // idle | maybeTap | longPressed | pan | drag | pinch | pinchEnding
+  let start = null, startInfo = null, pinch = null, lpTimer = null;
 
   const local = (e) => {
     const r = el.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
+  const world = (p) => vp.screenToWorld(p.x, p.y);
+  const info = (e, extra = {}) => ({ pointerType: e.pointerType, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, button: e.button, ...extra });
+  const clearLP = () => { clearTimeout(lpTimer); lpTimer = null; };
 
   el.addEventListener('pointerdown', (e) => {
     el.setPointerCapture?.(e.pointerId);
-    pts.set(e.pointerId, local(e));
+    const p = local(e);
+    pts.set(e.pointerId, p);
     if (pts.size === 1) {
+      start = p;
+      startInfo = info(e);
+      if (e.pointerType === 'mouse' && e.button !== 0) { mode = 'pan'; return; }
       mode = 'maybeTap';
-      start = local(e);
+      if (e.pointerType === 'touch') {
+        lpTimer = setTimeout(() => {
+          if (mode === 'maybeTap') { mode = 'longPressed'; navigator.vibrate?.(15); }
+        }, 450);
+      }
     } else if (pts.size === 2) {
-      mode = 'pinch'; // 1本指の操作（タップ/パン）はここで破棄
+      clearLP();
+      if (mode === 'drag') H.onDragCancel();
+      mode = 'pinch';
       const [a, b] = [...pts.values()];
       pinch = { dist: dist(a, b), mid: mid(a, b) };
     }
   });
 
   el.addEventListener('pointermove', (e) => {
-    if (!pts.has(e.pointerId)) return;
+    if (!pts.has(e.pointerId)) {
+      if (e.pointerType === 'mouse' && e.buttons === 0) H.onHover(world(local(e)), info(e));
+      return;
+    }
     const prev = pts.get(e.pointerId);
     const cur = local(e);
     pts.set(e.pointerId, cur);
-    if (mode === 'maybeTap' && dist(cur, start) > tapSlop) mode = 'pan';
-    if (mode === 'pan' && pts.size === 1) {
-      vp.panBy(cur.x - prev.x, cur.y - prev.y);
-      onChange();
-    } else if (mode === 'pinch' && pts.size >= 2) {
+    if ((mode === 'maybeTap' || mode === 'longPressed') && dist(cur, start) > tapSlop) {
+      const lp = mode === 'longPressed';
+      clearLP();
+      mode = H.onDragStart(world(start), { ...startInfo, longPress: lp }) ? 'drag' : 'pan';
+      if (mode === 'pan') { vp.panBy(cur.x - start.x, cur.y - start.y); H.onChange(); }
+      else H.onDragMove(world(cur), info(e));
+      return;
+    }
+    if (mode === 'drag') H.onDragMove(world(cur), info(e));
+    else if (mode === 'pan' && pts.size === 1) { vp.panBy(cur.x - prev.x, cur.y - prev.y); H.onChange(); }
+    else if (mode === 'pinch' && pts.size >= 2) {
       const [a, b] = [...pts.values()];
       const d = dist(a, b), m = mid(a, b);
       if (pinch.dist > 0) vp.zoomAt(m.x, m.y, d / pinch.dist);
       vp.panBy(m.x - pinch.mid.x, m.y - pinch.mid.y);
       pinch = { dist: d, mid: m };
-      onChange();
+      H.onChange();
     }
   });
 
@@ -89,20 +119,24 @@ export function attachGestures(el, vp, { onChange = () => {}, onTap = () => {}, 
     if (!pts.has(e.pointerId)) return;
     const p = pts.get(e.pointerId);
     pts.delete(e.pointerId);
-    if (mode === 'maybeTap' && pts.size === 0 && e.type === 'pointerup') {
-      onTap(vp.screenToWorld(p.x, p.y));
-    }
-    if (pts.size === 0) mode = 'idle';
-    else if (pts.size === 1 && mode === 'pinch') mode = 'pinchEnding'; // 指を1本離しても残りでパンしない
+    clearLP();
+    const up = e.type === 'pointerup';
+    if (pts.size === 0) {
+      if (mode === 'maybeTap' && up) H.onTap(world(p), info(e));
+      else if (mode === 'longPressed' && up) H.onLongPress(world(p), info(e));
+      else if (mode === 'drag') { if (up) H.onDragEnd(world(p), info(e)); else H.onDragCancel(); }
+      mode = 'idle';
+    } else if (mode === 'pinch') mode = 'pinchEnding'; // 指を1本離しても残りでパンしない
   };
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
 
   el.addEventListener('wheel', (e) => {
     e.preventDefault();
     const p = local(e);
     vp.zoomAt(p.x, p.y, Math.exp(-e.deltaY * 0.0015));
-    onChange();
+    H.onChange();
   }, { passive: false });
 }
 

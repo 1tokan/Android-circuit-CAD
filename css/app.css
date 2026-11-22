@@ -124,7 +124,8 @@ button { font: inherit; color: inherit; }
 }
 .tool {
   flex: 1 0 44px; min-width: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  border: 0; border-radius: 10px; background: transparent; color: var(--fg2); font-size: 12px; cursor: pointer;
+  border: 0; border-radius: 10px; background: transparent; color: var(--fg2); font-size: 11px; cursor: pointer;
+  white-space: nowrap; letter-spacing: -0.02em; padding: 0 1px;
 }
 .tool:disabled { opacity: .4; }
 .tool .ico { width: 22px; height: 22px; border: 2px solid currentColor; border-radius: 6px; margin-bottom: 2px; }
@@ -185,3 +186,87 @@ button { font: inherit; color: inherit; }
   background: var(--bg3); border: 1px solid var(--line); padding: 10px 14px; border-radius: 10px; max-width: 90vw; font-size: 14px;
 }
 .toast.error { border-color: var(--err); color: #ffd0cd; }
+
+/* ================= 第2段階: 回路図エディタ ================= */
+#content { --sym: #d9dee6; --wire: #4fd18b; --sel: #ffcf4a; }
+#content .sym { fill: none; stroke: var(--sym); stroke-width: 0.15; stroke-linecap: round; stroke-linejoin: round; }
+#content .sym .fill, .sym-preview .fill { fill: var(--sym); }
+#content text { fill: var(--sym); font-size: 1.1px; font-family: system-ui, sans-serif; stroke: none; }
+#content .comp text.ref { fill: #9fd3ff; font-size: 1.2px; }
+#content .comp text.val { fill: #c9c9a0; font-size: 1.1px; }
+#content .comp text.pinnum { fill: #8a96a8; font-size: 0.8px; }
+#content .comp.sel .sym { stroke: var(--sel); }
+#content .comp.sel .sym .fill { fill: var(--sel); }
+#content .comp.dnp .sym { stroke-dasharray: 0.4 0.3; opacity: .6; }
+#content .wire { stroke: var(--wire); stroke-width: 0.2; stroke-linecap: round; }
+#content .wire.sel { stroke: var(--sel); stroke-width: 0.3; }
+#content .junction { fill: var(--wire); }
+#content .nc { fill: none; stroke: #f0716b; stroke-width: 0.1; }
+#content .label path { stroke: var(--wire); stroke-width: 0.12; }
+#content .label text { fill: #f2a8ff; font-size: 1.2px; }
+#content .label .hit { fill: transparent; }
+#content .label.sel text { fill: var(--sel); }
+#content .label.sel .hit { fill: rgba(255,207,74,.15); }
+#content .ghost { opacity: .55; }
+#content .wire-preview { fill: none; stroke: var(--wire); stroke-width: 0.2; stroke-dasharray: 0.6 0.4; }
+#content .wire-start { fill: var(--wire); }
+#content .box-select { fill: rgba(63,182,168,.12); stroke: var(--accent); stroke-width: 0.1; stroke-dasharray: 0.5 0.3; }
+#content .cursor { stroke: var(--sel); stroke-width: 0.12; }
+
+/* 状態表示バー（キャンバス上部のチップ） */
+.ctxbar {
+  position: absolute; left: 6px; right: 6px; top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  pointer-events: none;
+}
+.ctxbar > * { pointer-events: auto; }
+.chip {
+  min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--line);
+  background: rgba(28,34,44,.92); color: var(--fg); font-size: 13px; cursor: pointer;
+}
+.chip.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.chip-info { font-size: 13px; padding: 4px 8px; border-radius: 8px; background: rgba(28,34,44,.8); }
+.chip-info.hint { color: var(--fg2); font-size: 12px; }
+
+.tool.on { background: var(--bg3); color: var(--accent); }
+.tool svg.ico { width: 22px; height: 22px; border: 0; margin-bottom: 2px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* 部品一覧シート */
+.picker {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 9; max-height: 62dvh; display: flex; flex-direction: column;
+  background: var(--bg2); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0;
+  box-shadow: 0 -10px 30px rgba(0,0,0,.45); padding-bottom: var(--safe-b);
+}
+.picker.dragging { opacity: .35; pointer-events: none; }
+.picker-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; }
+.picker-head h2 { font-size: 15px; margin: 0; }
+.picker-head .hint { flex: 1; font-size: 11px; color: var(--fg2); }
+.picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; padding: 0 10px 12px; overflow: auto; }
+.pick {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; min-height: 76px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg); cursor: pointer; font-size: 11px; touch-action: none;
+}
+.pick.on { border-color: var(--accent); }
+.sym-preview { width: 52px; height: 40px; }
+.sym-preview .sym { fill: none; stroke: var(--fg); stroke-width: 0.2; stroke-linecap: round; stroke-linejoin: round; }
+.sym-preview text { fill: var(--fg); font-size: 1.1px; }
+.drag-ghost {
+  position: fixed; z-index: 30; transform: translate(-50%, -110%); pointer-events: none; display: flex; flex-direction: column; align-items: center;
+  background: var(--bg3); border: 1px solid var(--accent); border-radius: 10px; padding: 4px 8px; font-size: 11px;
+}
+@media (min-width: 900px) {
+  .picker { left: 76px; right: 260px; max-height: 46dvh; }
+}
+
+/* 属性フォーム */
+.form { display: flex; flex-direction: column; gap: 8px; max-height: 60dvh; overflow: auto; }
+.field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--fg2); }
+.field input[type=text] { width: 100%; min-height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; font-size: 15px; }
+.field.check { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--fg); }
+.field.check input { width: 20px; height: 20px; accent-color: var(--accent); }
+.note { font-size: 12px; color: var(--fg2); }
+.warn { color: var(--warn); font-size: 12px; }
+.netlist { list-style: none; padding: 0; max-height: 50dvh; overflow: auto; }
+.netlist li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sel-info .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 3px 0; }
+.sel-info p.kv { display: block; color: var(--fg2); }
+.small-btn { min-height: 36px; margin: 8px 0 14px; width: 100%; }
