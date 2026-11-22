@@ -5,9 +5,9 @@
 export const MODULES = [
   { id: 'project',   name: 'プロジェクト管理・保存', stage: 1, status: 'ready' },
   { id: 'schematic', name: '回路図エディタ',         stage: 2, status: 'ready' },
-  { id: 'library',   name: '電子部品ライブラリ',     stage: 3, status: 'planned' },
-  { id: 'lcsc',      name: 'LCSC部品検索・管理',     stage: 3, status: 'planned' },
-  { id: 'netlist',   name: 'ネットリスト生成',       stage: 3, status: 'planned' },
+  { id: 'library',   name: '電子部品ライブラリ',     stage: 3, status: 'ready' },
+  { id: 'lcsc',      name: 'LCSC部品検索・管理',     stage: 3, status: 'ready', note: '公式APIは非使用（CSV/JSON取込・手動登録・LCSCリンク）' },
+  { id: 'netlist',   name: 'ネットリスト生成',       stage: 3, status: 'ready' },
   { id: 'pcb',       name: 'PCBレイアウトエディタ',  stage: 4, status: 'planned' },
   { id: 'erc',       name: 'ERC（電気的ルール）',    stage: 5, status: 'planned' },
   { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'planned' },
@@ -41,7 +41,12 @@ export const TOOLS = {
     { id: 'zone', label: 'ベタ' }, { id: 'outline', label: '外形' }, { id: 'text', label: '文字' },
     { id: 'rotate', label: '回転' }, { id: 'delete', label: '削除' },
   ],
-  parts: [{ id: 'search', label: '検索' }, { id: 'import', label: '取込' }, { id: 'add', label: '登録' }],
+  parts: [
+    { id: 'search', label: '検索', icon: 'M10 4a6 6 0 1 0 0 12a6 6 0 0 0 0-12zM15 15l5 5' },
+    { id: 'import', label: '取込', icon: 'M12 4v11M7 10l5 5 5-5M5 20h14' },
+    { id: 'add', label: '登録', icon: 'M12 5v14M5 12h14' },
+    { id: 'export', label: '書出', icon: 'M12 15V4M7 9l5-5 5 5M5 20h14' },
+  ],
   check: [{ id: 'erc', label: 'ERC' }, { id: 'drc', label: 'DRC' }],
   output: [{ id: 'gerber', label: 'Gerber' }, { id: 'bom', label: 'BOM' }, { id: 'cpl', label: 'CPL' }],
 };

@@ -329,14 +329,14 @@ await step('保存→再読込で回路図と接続が復元', async () => {
   assert.ok(await page.locator('#content .comp').count() >= 5);
 });
 
-await step('接続一覧（確認用）ダイアログ', async () => {
+await step('ネットリストダイアログ（GND・LED_A のネットを含む）', async () => {
   await page.locator('#btn-menu').click();
-  await page.locator('[data-act="netlist-preview"]').click();
+  await page.locator('[data-act="netlist"]').click();
+  await page.waitForSelector('#dialog[open]');
   const t = await page.locator('#dialog-body').textContent();
   assert.match(t, /GND/);
   assert.match(t, /LED_A/);
-  assert.match(t, /第3段階/);
-  await page.locator('#dialog-actions button').click();
+  await page.locator('#dialog-actions button[value=""]').click();
 });
 
 await step('タブレット: マウスで空白ドラッグ＝範囲選択、Rキーで回転、Ctrl+Zで戻す', async () => {

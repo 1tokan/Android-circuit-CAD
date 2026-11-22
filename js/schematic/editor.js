@@ -29,6 +29,7 @@ export function createSchematicEditor(ctx) {
     sel: new Set(),
     multi: false,
     placeKind: 'resistor',
+    placePart: null,   // ライブラリの部品を配置するとき（第3段階）
     placeRot: 0,
     powerNet: 'VCC',
     lastLabel: 'NET1',
@@ -72,8 +73,9 @@ export function createSchematicEditor(ctx) {
   function ghostComp(p) {
     const kind = st.tool === 'power' ? (st.powerNet === 'GND' ? 'gnd' : 'power') : st.placeKind;
     const info = kindInfo(kind);
+    const partProps = st.tool === 'place' && st.placePart ? ctx.partProps(st.placePart) : {};
     return { id: 'ghost', kind, ref: info.prefix + '?', x: p.x, y: p.y, rot: st.placeRot, mirror: false,
-      props: { ...info.props, ...(info.power ? { net: st.powerNet } : {}) } };
+      props: { ...info.props, ...(info.power ? { net: st.powerNet } : {}), ...partProps } };
   }
 
   function targetPoint(p, t) { return snapTarget(sheet(), p, t) || snapPt(p); }
@@ -95,7 +97,8 @@ export function createSchematicEditor(ctx) {
         chips.push('<span class="chip-info hint">タップで選択・長押し＋ドラッグで範囲選択</span>');
       }
     } else if (st.tool === 'place') {
-      chips.push(chip('pick', `部品: ${kindInfo(st.placeKind).label} ▼`), chip('ghostRot', `向き ${st.placeRot}°`));
+      chips.push(chip('pick', st.placePart ? `部品: ${st.placePart.name} ▼` : `部品: ${kindInfo(st.placeKind).label} ▼`), chip('ghostRot', `向き ${st.placeRot}°`));
+      chips.push(chip('library', 'ライブラリ'));
       chips.push('<span class="chip-info hint">タップした位置に配置</span>');
     } else if (st.tool === 'wire') {
       chips.push(chip('bend', st.wire.hFirst ? '曲げ: 横→縦' : '曲げ: 縦→横'));
@@ -116,6 +119,7 @@ export function createSchematicEditor(ctx) {
       case 'rotate': case 'mirror': case 'delete': action(act); return;
       case 'clear': setSel(new Set()); break;
       case 'pick': openPicker(); break;
+      case 'library': ctx.openLibrary(); return;
       case 'ghostRot': st.placeRot = (st.placeRot + 90) % 360; break;
       case 'bend': st.wire.hFirst = !st.wire.hFirst; break;
       case 'finish': st.wire.pts = []; break;
@@ -249,10 +253,13 @@ export function createSchematicEditor(ctx) {
     const at = snapPt(p);
     const kind = st.tool === 'power' ? (st.powerNet === 'GND' ? 'gnd' : 'power') : st.placeKind;
     let placed;
+    const part = st.tool === 'place' ? st.placePart : null;
     edit((s) => {
-      placed = addComponent(s, kind, at.x, at.y, kind === 'power' || kind === 'gnd' ? { net: st.powerNet } : {});
+      const extra = kind === 'power' || kind === 'gnd' ? { net: st.powerNet } : part ? ctx.partProps(part) : {};
+      placed = addComponent(s, kind, at.x, at.y, extra);
       placed.rot = st.placeRot;
     }, '部品配置');
+    if (part) ctx.onPartUsed(part);
     ctx.ui.toast(`${placed.ref} を配置しました`);
     render();
   }
@@ -260,6 +267,7 @@ export function createSchematicEditor(ctx) {
   /** 外部（部品一覧からのドラッグ）からの配置 */
   function placeKindAt(kind, p) {
     st.placeKind = kind;
+    st.placePart = null;
     st.tool = 'place';
     ctx.onToolChange?.('place');
     placeAt(p);
@@ -354,6 +362,7 @@ export function createSchematicEditor(ctx) {
         }
       } else if (ok) {
         st.placeKind = kind;
+        st.placePart = null;
         st.tool = 'place';
         ctx.onToolChange?.('place');
         closePicker();
@@ -394,10 +403,15 @@ export function createSchematicEditor(ctx) {
           f('pinNames', 'ピン名（カンマ区切り、1番から）', c.props.pinNames, 'placeholder="例: VCC,GND,SDA,SCL"');
       }
       html += `<label class="field check"><input type="checkbox" name="dnp" ${c.props.dnp ? 'checked' : ''}> 実装しない（BOM/CPLから除外）</label>`;
-      html += '<p class="note">フットプリントの実体とピン↔パッド対応は第3段階（部品ライブラリ）で結びつけます。</p>';
+      const part = c.props.partId ? ctx.getProjectPart(c.props.partId) : null;
+      html += part
+        ? `<p class="note">部品データ: <b>${esc(part.name)}</b>${part.lcsc ? `（${esc(part.lcsc)}）` : ''}。フットプリントとピン↔パッド対応は部品データのものを使います。</p>`
+        : '<p class="note">部品データ未割り当て。「ライブラリから選ぶ」でLCSC品番・フットプリント・ピン対応をまとめて設定できます。</p>';
     }
     const r = await ctx.ui.ask(`${c.ref} の属性`, `<div class="form">${html}</div>`,
-      [{ label: 'キャンセル', value: '' }, { label: '保存', value: 'ok', cls: 'primary' }]);
+      [{ label: 'キャンセル', value: '' }, ...(info.power ? [] : [{ label: 'ライブラリから選ぶ', value: 'lib' }]), ...(c.props.partId ? [{ label: '部品データを外す', value: 'unlink' }] : []), { label: '保存', value: 'ok', cls: 'primary' }]);
+    if (r === 'lib') { ctx.openLibrary({ key: k, ref: c.ref }); return; }
+    if (r === 'unlink') { edit((s) => { delete findItem(s, k).props.partId; }, '部品データを外す'); render(); return; }
     if (r !== 'ok') return;
     const v = (n) => $(`#dialog-body [name="${n}"]`);
     if (info.power) {
@@ -472,9 +486,39 @@ export function createSchematicEditor(ctx) {
   $('#picker-close').addEventListener('click', closePicker);
   document.addEventListener('keydown', onKey);
 
+  /** ライブラリの部品を配置モードにする */
+  function setPlacePart(part) {
+    st.placePart = part;
+    st.placeKind = part.kind;
+    st.tool = 'place';
+    st.placeRot = 0;
+    setSel(new Set(), false);
+    ctx.onToolChange?.('place');
+    render();
+  }
+
+  /** 回路図の部品にライブラリの部品データを割り当てる（シンボル種別が違えば種別も変える） */
+  function assignPart(key, part) {
+    const c = findItem(sheet(), key);
+    if (!c) return null;
+    const kindChanged = c.kind !== part.kind;
+    edit((s) => {
+      const x = findItem(s, key);
+      x.kind = part.kind;
+      Object.assign(x.props, ctx.partProps(part));
+      if (!part.symbol?.pinCount) { delete x.props.pinCount; delete x.props.pinNames; }
+    }, '部品データ割り当て');
+    ctx.onPartUsed(part);
+    setSel(new Set([key]), false);
+    render();
+    return { ref: c.ref, kindChanged };
+  }
+
   return {
     state: st,
     render,
+    setPlacePart,
+    assignPart,
     setTool,
     action,
     editProps,

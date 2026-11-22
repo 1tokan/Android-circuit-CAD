@@ -3,11 +3,12 @@
 //   projects : 最新版（keyPath: id）
 //   backups  : 保存ごとの世代バックアップ（プロジェクトごとに最大 MAX_BACKUPS 件）
 //   kv       : アプリ設定（最後に開いたプロジェクト等）
+//   parts    : ユーザー部品ライブラリ（取込・手動登録した部品。内蔵部品は保存しない）
 
 import { normalizeProject, summarize } from './project.js';
 
 const DB_NAME = 'pocket-eda';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2: ユーザー部品ライブラリ(parts)を追加
 export const MAX_BACKUPS = 10;
 
 let dbPromise = null;
@@ -43,6 +44,10 @@ export function openDB(idb = globalThis.indexedDB) {
         b.createIndex('projectId', 'projectId');
       }
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      if (!db.objectStoreNames.contains('parts')) {
+        const p = db.createObjectStore('parts', { keyPath: 'id' });
+        p.createIndex('lcsc', 'lcsc');
+      }
     };
     r.onsuccess = () => {
       const db = r.result;
@@ -124,4 +129,34 @@ export async function requestPersistence() {
     if (navigator.storage?.persist) return await navigator.storage.persist();
   } catch { /* 非対応 */ }
   return false;
+}
+
+// ---------------- 部品ライブラリ ----------------
+export async function listUserParts() {
+  const db = await openDB();
+  return req2p(db.transaction('parts').objectStore('parts').getAll());
+}
+
+/** まとめて追加・上書き（同じIDは上書き） */
+export async function putParts(parts) {
+  const db = await openDB();
+  const tx = db.transaction('parts', 'readwrite');
+  const st = tx.objectStore('parts');
+  for (const p of parts) st.put(JSON.parse(JSON.stringify(p)));
+  await txDone(tx);
+  return parts.length;
+}
+
+export async function deleteParts(ids) {
+  const db = await openDB();
+  const tx = db.transaction('parts', 'readwrite');
+  ids.forEach((id) => tx.objectStore('parts').delete(id));
+  await txDone(tx);
+}
+
+export async function clearUserParts() {
+  const db = await openDB();
+  const tx = db.transaction('parts', 'readwrite');
+  tx.objectStore('parts').clear();
+  await txDone(tx);
 }

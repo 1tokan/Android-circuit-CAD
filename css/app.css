@@ -270,3 +270,49 @@ button { font: inherit; color: inherit; }
 .sel-info .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 3px 0; }
 .sel-info p.kv { display: block; color: var(--fg2); }
 .small-btn { min-height: 36px; margin: 8px 0 14px; width: 100%; }
+
+/* ================= 第3段階: 部品ライブラリ ================= */
+.parts-view { position: absolute; inset: 0; overflow: auto; background: var(--bg); z-index: 2; padding-bottom: 24px; }
+.pv-search { position: sticky; top: 0; z-index: 1; background: var(--bg2); border-bottom: 1px solid var(--line); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.pv-search input[type=search] { width: 100%; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; font-size: 16px; }
+.pv-filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pv-filters select, .field select, .field textarea { min-height: 38px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; padding: 0 8px; }
+.field textarea { padding: 6px 8px; font-family: ui-monospace, monospace; font-size: 13px; width: 100%; }
+.pv-chk { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.pv-chk input { width: 18px; height: 18px; accent-color: var(--accent); }
+.pv-count { font-size: 12px; color: var(--fg2); }
+.pv-assign { background: rgba(63,182,168,.15); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 8px; font-size: 13px; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.pv-list { list-style: none; margin: 0; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.pv-item { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+.pv-item:active { background: var(--bg3); }
+.pv-row1 { display: flex; gap: 6px; align-items: center; }
+.pv-row1 b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-row2 { font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-row3 { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; margin-top: 4px; color: var(--fg2); }
+.pv-row3 a, .pv-detail a { color: var(--accent); }
+.pv-more, .pv-empty { list-style: none; text-align: center; color: var(--fg2); padding: 12px; }
+.badge.jlc-basic { color: #8fe3a5; border-color: #2c5a37; }
+.badge.jlc-preferred { color: #9fd3ff; border-color: #29506e; }
+.badge.jlc-extended { color: var(--warn); border-color: #5a4a22; }
+.pv-detail .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.pv-detail .kv b { text-align: right; font-weight: 500; word-break: break-all; }
+.pv-detail h4, .dialog h4 { margin: 14px 0 6px; font-size: 14px; }
+.pv-links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.pv-links .btn { display: inline-flex; align-items: center; text-decoration: none; color: var(--fg); min-height: 36px; font-size: 13px; }
+.pv-previews { display: flex; gap: 10px; align-items: center; justify-content: space-around; background: var(--canvas); border-radius: 10px; padding: 8px; }
+.pv-previews .sym-preview { width: 110px; height: 80px; }
+.fp-preview { width: 150px; height: 110px; }
+.fp-preview .pad rect, .fp-preview .pad circle { fill: #c8a24a; }
+.fp-preview .pad .hole { fill: var(--canvas); }
+.fp-preview .pad text { fill: #1a1a1a; text-anchor: middle; font-family: system-ui, sans-serif; font-weight: 700; }
+.fp-preview .court { fill: none; stroke: #7a5ca8; stroke-width: 0.05; stroke-dasharray: 0.2 0.15; }
+.fp-preview .origin { stroke: #fff; stroke-width: 0.05; }
+.pin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pin-table th, .pin-table td { border-bottom: 1px solid var(--line); padding: 4px; text-align: left; }
+.errs { color: #ffb3ae; font-size: 13px; padding-left: 18px; }
+.warns { color: var(--warn); font-size: 13px; padding-left: 18px; }
+.ok { color: var(--accent); font-size: 13px; }
+.err { color: var(--err); }
+.dialog { max-height: 92dvh; overflow: auto; }
+.dialog-actions .btn { min-height: 40px; }
+.module-status small.note { font-size: 11px; }
