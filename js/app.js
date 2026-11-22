@@ -24,7 +24,7 @@ import { createOutputView } from './output/view.js';
 import { moduleById } from './modules/registry.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 
 const state = {
   project: null,

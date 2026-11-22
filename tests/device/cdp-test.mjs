@@ -85,6 +85,12 @@ await step('起動: アプリ版として読み込まれ、保存先が使える
   if (info.ready !== '1' || !info.native) throw new Error(JSON.stringify(info));
   if (info.plugins.join() !== 'App,Filesystem,Share') throw new Error('プラグイン不足: ' + info.plugins);
   report.device = info;
+  // Android 15 以降の「端から端まで表示」で、アプリの上端・下端がステータスバーやナビゲーションバーに隠れないこと
+  const size = /(\d+)x(\d+)/.exec(adb('shell', 'wm', 'size').split('\n').filter(Boolean).pop());
+  const screenH = Math.max(+size[1], +size[2]);
+  info.screenH = screenH;
+  info.webViewH = Math.round(info.h * info.dpr);
+  if (info.webViewH > screenH - 40) throw new Error(`WebView が画面いっぱい（${info.webViewH}/${screenH}px）で、システムバーの下に隠れます`);
   await shot('01-start');
   return info;
 });
