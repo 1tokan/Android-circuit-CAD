@@ -1,7 +1,7 @@
 // PCB レイアウトエディタ（操作・UI）
 // データの変更は必ず ctx.edit(fn, label) を通す（PCB用の元に戻す履歴と自動保存に乗せる）
 import {
-  ensurePcb, toNm, toMm, routePath, snapMm, addTrackPath, addVia, addBoardZone, addText, addHole, setOutlineRect,
+  ensurePcb, toNm, toMm, arrangeInBoard, fpBox, boardRect, routePath, snapMm, addTrackPath, addVia, addBoardZone, addText, addHole, setOutlineRect,
   hitTest, itemsInRect, moveSelection, rotateSelection, flipSelection, deleteSelection, findItem, boardSizeText, importNetlist,
 } from './model.js';
 import { computePcbConnectivity, snapTarget } from './connectivity.js';
@@ -92,6 +92,9 @@ export function createPcbEditor(ctx) {
     if (st.tool === 'select') {
       if (!pcb().footprints.length) c.push(chip('import', 'ネットリストを読み込む', true));
       else c.push(chip('import', 'ネットリスト再読込'));
+      const br = boardRect(pcb());
+      const outside = pcb().footprints.filter((f) => { const b = fpBox(f); return b.x1 < br.x0 || b.x0 > br.x1 || b.y1 < br.y0 || b.y0 > br.y1; }).length;
+      if (outside) c.push(chip('arrange', `基板内に並べる（${outside}）`, true));
       c.push(chip('multi', st.multi ? '複数選択 ON' : '複数選択', st.multi), layerChip);
       if (st.sel.size) c.push(chip('props', '属性'), chip('rotate', '回転'), chip('flip', '裏返す'), chip('delete', '削除'), chip('clear', '解除'));
       c.push(info);
@@ -114,6 +117,13 @@ export function createPcbEditor(ctx) {
   async function onCtx(a) {
     switch (a) {
       case 'import': await importFromSchematic(); break;
+      case 'arrange': {
+        let r;
+        edit((p) => { r = arrangeInBoard(p); }, '基板内に並べる');
+        if (r?.notFit.length) ctx.ui.toast(`${r.moved.length}個を並べました。入りきらない部品: ${r.notFit.join(', ')}（基板を大きくしてください）`, true);
+        else if (r) ctx.ui.toast(`${r.moved.length}個を基板内に並べました。位置を整えてから配線してください`);
+        break;
+      }
       case 'multi': st.multi = !st.multi; break;
       case 'layer': st.layer = st.layer === 'F.Cu' ? 'B.Cu' : 'F.Cu'; break;
       case 'props': await editProps(); break;

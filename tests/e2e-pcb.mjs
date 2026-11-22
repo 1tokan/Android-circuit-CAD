@@ -99,6 +99,7 @@ await step('ネットリスト読込: 3部品・パッドにネット・ラッ�
   assert.equal(await page.locator('#pcb-content .ratsnest line').count(), 3);
   assert.equal(await page.evaluate(() => window.pocketEDA.state.project.netlist?.format), 'pocket-eda-netlist');
   await page.screenshot({ path: `${OUT}/pcb-imported-phone.png` });
+  assert.match(await page.locator('#ctxbar [data-pctx="arrange"]').textContent(), /基板内に並べる（3）/);
 });
 
 await step('部品をタッチでドラッグして基板内へ（0.25mmグリッドに吸着）', async () => {

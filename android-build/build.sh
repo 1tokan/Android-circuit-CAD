@@ -11,7 +11,18 @@ cp -r index.html manifest.webmanifest sw.js css js icons www/
 
 # Capacitor は package.json の dependencies に書かれたプラグインだけを組み込むので、--save で入れる（CI上のみの変更）
 npm i --no-package-lock --no-audit --no-fund \
-  @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7 @capacitor/filesystem@7 @capacitor/share@7
+  @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7 @capacitor/filesystem@7 @capacitor/share@7 @capacitor/app@7
+# 試験用（WEBVIEW_DEBUG=1）: WebView のデバッグ接続を許可した APK を別名で作る。配布する APK では無効のまま
+if [ "${WEBVIEW_DEBUG:-0}" = "1" ]; then
+  cp capacitor.config.json /tmp/capacitor.config.json.orig
+  trap 'cp /tmp/capacitor.config.json.orig capacitor.config.json' EXIT
+  python3 - <<'PY'
+import json
+c = json.load(open('capacitor.config.json'))
+c.setdefault('android', {})['webContentsDebuggingEnabled'] = True
+json.dump(c, open('capacitor.config.json', 'w'), ensure_ascii=False, indent=2)
+PY
+fi
 npx cap add android
 npx cap sync android
 
@@ -45,22 +56,24 @@ assert n == 1, 'build.gradle に buildTypes { release { が見つかりません
 open(p, 'w').write(s)
 PY
 
-# 組み込みプラグインの確認（Filesystem と Share が無ければ失敗させる）
+# 組み込みプラグインの確認（Filesystem・Share・App が無ければ失敗させる）
 grep -q '"@capacitor/filesystem"' android/app/src/main/assets/capacitor.plugins.json
 grep -q '"@capacitor/share"' android/app/src/main/assets/capacitor.plugins.json
+grep -q '"@capacitor/app"' android/app/src/main/assets/capacitor.plugins.json
 
 # リリース版（debuggable=false）。デバッグ版は Play プロテクトの確認で警告されやすい
 (cd android && ./gradlew assembleRelease --no-daemon -q)
-cp android/app/build/outputs/apk/release/app-release.apk "dist/pocket-eda-${VERSION}.apk"
+SUFFIX=""; [ "${WEBVIEW_DEBUG:-0}" = "1" ] && SUFFIX="-devtest"
+cp android/app/build/outputs/apk/release/app-release.apk "dist/pocket-eda-${VERSION}${SUFFIX}.apk"
 
 # 署名の確認: リポジトリの鍵で署名されていなければ失敗させる（別の鍵だとスマホで上書き更新できない）
 EXPECTED=$(keytool -list -v -keystore "$KS" -storepass android -alias androiddebugkey 2>/dev/null | grep 'SHA256:' | head -1 | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-F' 'a-f')
 APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-ACTUAL=$("$APKSIGNER" verify --print-certs "dist/pocket-eda-${VERSION}.apk" | grep 'SHA-256 digest' | head -1 | sed 's/.*: //')
+ACTUAL=$("$APKSIGNER" verify --print-certs "dist/pocket-eda-${VERSION}${SUFFIX}.apk" | grep 'SHA-256 digest' | head -1 | sed 's/.*: //')
 echo "expected cert: $EXPECTED"
 echo "actual cert:   $ACTUAL"
 [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo '署名鍵が一致しません'; exit 1; }
 # デバッグ版になっていないことの確認
 AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
-if "$AAPT" dump xmltree --file AndroidManifest.xml "dist/pocket-eda-${VERSION}.apk" | grep -q 'debuggable.*=true'; then echo 'debuggable=true になっています'; exit 1; fi
+if "$AAPT" dump xmltree --file AndroidManifest.xml "dist/pocket-eda-${VERSION}${SUFFIX}.apk" | grep -q 'debuggable.*=true'; then echo 'debuggable=true になっています'; exit 1; fi
 ls -la dist

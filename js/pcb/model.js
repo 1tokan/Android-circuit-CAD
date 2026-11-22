@@ -358,3 +358,46 @@ export function deleteSelection(pcb, sel) {
   }
   return changed;
 }
+
+// ---------------- 基板内に並べる ----------------
+/**
+ * 基板の外にある部品（または指定した部品）を、基板の中の空いている場所に左上から並べる（棚詰め）。
+ * すでに基板内にある部品は動かさず、その外形枠を避ける。位置はグリッドに乗せる。
+ * @returns {{ moved: string[], notFit: string[] }}
+ */
+export function arrangeInBoard(pcb, { refs = null, gapMm = 1.0, edgeMm = 1.0 } = {}) {
+  const br = boardRect(pcb);
+  const grid = toMm(pcb.settings?.grid || toNm(0.25));
+  const inside = (b) => b.x0 >= br.x0 && b.x1 <= br.x1 && b.y0 >= br.y0 && b.y1 <= br.y1;
+  // 外形枠の上に部品番号のシルク（高さ1mm＋隙間）が載るので、その分も場所を取る
+  const REF_H = 1.5;
+  const boxOf = (f) => { const b = fpBox(f); return f.hideRef ? b : { ...b, y0: b.y0 - REF_H }; };
+  const targets = pcb.footprints.filter((f) => !f.locked && (refs ? refs.includes(f.ref) : !inside(fpBox(f))));
+  const fixed = pcb.footprints.filter((f) => !targets.includes(f)).map(boxOf);
+  // 大きい部品から（詰めやすい）、同じ大きさなら部品番号順
+  const cmp = (a, b) => String(a.ref).localeCompare(String(b.ref), 'en', { numeric: true });
+  targets.sort((a, b) => (fpArea(b) - fpArea(a)) || cmp(a, b));
+  const placed = [...fixed];
+  const moved = [], notFit = [];
+  const hits = (b) => placed.some((q) => b.x0 < q.x1 + gapMm && q.x0 < b.x1 + gapMm && b.y0 < q.y1 + gapMm && q.y0 < b.y1 + gapMm);
+  for (const f of targets) {
+    const b0 = boxOf(f);
+    const w = b0.x1 - b0.x0, h = b0.y1 - b0.y0;
+    const cx = toMm(f.x) - b0.x0, cy = toMm(f.y) - b0.y0; // 原点から外形枠左上までの距離
+    let done = false;
+    for (let y = br.y0 + edgeMm; y + h <= br.y1 - edgeMm + 1e-9 && !done; y += grid * 2) {
+      for (let x = br.x0 + edgeMm; x + w <= br.x1 - edgeMm + 1e-9; x += grid * 2) {
+        const px = snapMm(x + cx, grid), py = snapMm(y + cy, grid);
+        const b = { x0: px - cx, y0: py - cy, x1: px - cx + w, y1: py - cy + h };
+        if (b.x0 < br.x0 + edgeMm - 1e-9 || b.y0 < br.y0 + edgeMm - 1e-9 || b.x1 > br.x1 - edgeMm + 1e-9 || b.y1 > br.y1 - edgeMm + 1e-9) continue;
+        if (hits(b)) continue;
+        f.x = toNm(px); f.y = toNm(py);
+        placed.push(b); moved.push(f.ref); done = true;
+        break;
+      }
+    }
+    if (!done) notFit.push(f.ref);
+  }
+  return { moved, notFit };
+}
+function fpArea(f) { const b = fpBox(f); return (b.x1 - b.x0) * (b.y1 - b.y0); }

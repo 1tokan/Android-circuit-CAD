@@ -211,6 +211,41 @@ await step('manifest がインストール要件を満たす', async () => {
   assert.ok(m.icons.some((i) => i.sizes === '192x192') && m.icons.some((i) => i.sizes === '512x512'));
 });
 
+await step('戻る操作: ドロワー → メニュー → PCB画面 → 回路図の順に戻り、最後は false（アプリを閉じてよい）', async () => {
+  const back = () => page.evaluate(() => window.pocketEDA.back());
+  await page.locator('#ws-nav button[data-ws="pcb"]').click();
+  await page.locator('#btn-projects').click();
+  assert.equal(await back(), true);
+  assert.ok(await page.locator('#drawer').isHidden());
+  await page.locator('#btn-menu').click();
+  assert.ok(await page.locator('#menu').isVisible());
+  assert.equal(await back(), true);
+  assert.ok(await page.locator('#menu').isHidden());
+  assert.equal(await page.evaluate(() => window.pocketEDA.state.workspace), 'pcb', 'メニューを閉じても画面はそのまま');
+  await page.locator('#toolbar .tool[data-tool="route"]').click();
+  assert.equal(await back(), true);
+  assert.equal(await page.evaluate(() => window.pocketEDA.state.pcbEditor.state.tool), 'select', '操作中のツールを取り消す');
+  assert.equal(await back(), true);
+  assert.equal(await page.evaluate(() => window.pocketEDA.state.workspace), 'schematic');
+  assert.equal(await back(), false);
+});
+
+await step('小さい画面（360×640）でも全タブが横にはみ出さない', async () => {
+  await page.setViewportSize({ width: 360, height: 640 });
+  for (const ws of ['schematic', 'pcb', 'parts', 'check', 'output']) {
+    await page.locator(`#ws-nav button[data-ws="${ws}"]`).click();
+    await page.waitForTimeout(150);
+    const sw = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth));
+    assert.ok(sw <= 361, `${ws}: 横幅 ${sw}px`);
+    // ツールボタンは指で押せる大きさ（高さ 40px 以上）
+    const small = await page.evaluate(() => [...document.querySelectorAll('#toolbar .tool')].filter((b) => b.getBoundingClientRect().height < 40).length);
+    assert.equal(small, 0, `${ws}: 小さすぎるツールボタン`);
+  }
+  await page.screenshot({ path: `${OUT}/small-360-output.png` });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#ws-nav button[data-ws="schematic"]').click();
+});
+
 await step('コンソールエラーなし', async () => {
   assert.deepEqual(errors, []);
 });

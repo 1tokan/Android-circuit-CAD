@@ -24,7 +24,7 @@ import { createOutputView } from './output/view.js';
 import { moduleById } from './modules/registry.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 
 const state = {
   project: null,
@@ -273,6 +273,26 @@ function toBase64(bytes) {
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   return btoa(s);
+}
+
+/**
+ * 戻る操作（Android の戻るボタン・戻るジェスチャー）。
+ * 開いているものを閉じる → 操作中のツールを取り消す → 回路図へ戻る、の順。何もなければ false（アプリを閉じてよい）。
+ */
+function handleBack() {
+  const dlg = $('#dialog');
+  if (dlg.open) { dlg.close(''); return true; }
+  if (!$('#menu').hidden) { $('#menu').hidden = true; return true; }
+  if (!$('#drawer').hidden) { closeDrawer(); return true; }
+  if (!$('#picker').hidden) { $('#picker').hidden = true; return true; }
+  const ed = activeEditor();
+  if (ed && (ed.state.tool !== 'select' || ed.state.sel.size)) {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    renderToolbar(); renderSidePanel();
+    return true;
+  }
+  if (state.workspace !== 'schematic') { state.marker = null; switchWorkspace('schematic'); return true; }
+  return false;
 }
 
 /** Android アプリ版（Capacitor）で動いているか */
@@ -656,7 +676,7 @@ function bindUI() {
     if (act === 'annotate') { state.editor.reannotate(); toast('部品番号を位置順に振り直しました'); }
     if (act === 'netlist') showNetlist();
     if (act === 'about') {
-      ask('Pocket EDA', `<p>${NATIVE ? 'Androidアプリ版 ' : ''}バージョン ${APP_VERSION}（第4段階: PCBレイアウト）</p><p>データはこの端末のブラウザ内（IndexedDB）に保存されます。端末変更やブラウザのデータ削除に備えて、JSON書き出しでバックアップしてください。</p>`,
+      ask('Pocket EDA', `<p>${NATIVE ? 'Androidアプリ版 ' : ''}バージョン ${APP_VERSION}</p><p>データはこの端末のブラウザ内（IndexedDB）に保存されます。端末変更やブラウザのデータ削除に備えて、JSON書き出しでバックアップしてください。</p>`,
         [{ label: '閉じる', value: '' }]);
     }
   });
@@ -684,6 +704,18 @@ function bindUI() {
     get: (_, name) => (name === 'onChange' ? scheduleCanvas : activeEditor()?.gestures?.[name]),
   }));
   new ResizeObserver(scheduleCanvas).observe(svg);
+
+  // Android の戻るボタン: アプリ内で戻れるところまで戻り、それ以上は保存してアプリを背面へ
+  const AppPlugin = globalThis.Capacitor?.Plugins?.App;
+  if (NATIVE && AppPlugin) {
+    AppPlugin.addListener('backButton', async () => {
+      if (handleBack()) return;
+      try { await state.saver.flush(); } catch { /* 保存失敗は表示済み */ }
+      AppPlugin.minimizeApp();
+    });
+    // 背面に回るときに保存
+    AppPlugin.addListener('pause', () => { writePending(); state.saver.flush().catch(() => {}); });
+  }
 
   // オンライン状態
   window.addEventListener('offline', () => toast('オフラインです（設計作業は続けられます）'));
@@ -818,6 +850,6 @@ async function boot() {
 }
 
 // 開発・テスト用の操作口（コンソールから使える）
-window.pocketEDA = { state, jumpTo, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
+window.pocketEDA = { state, jumpTo, back: handleBack, openProject, native: NATIVE, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
 
 boot();
