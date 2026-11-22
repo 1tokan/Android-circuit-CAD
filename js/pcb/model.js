@@ -354,7 +354,7 @@ export function deleteSelection(pcb, sel) {
     if (!ids.size) continue;
     const before = pcb[list].length;
     pcb[list] = pcb[list].filter((o) => !ids.has(o.id) || (k === 'f' && o.locked));
-    changed ||= pcb[list].length !== before;
+    changed = changed || pcb[list].length !== before;
   }
   return changed;
 }

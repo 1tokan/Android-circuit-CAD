@@ -246,6 +246,17 @@ await step('小さい画面（360×640）でも全タブが横にはみ出さな
   await page.locator('#ws-nav button[data-ws="schematic"]').click();
 });
 
+await step('古い WebView（structuredClone 等が無い）では本体を読み込まず、更新を案内する', async () => {
+  const c2 = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await c2.addInitScript(() => { delete window.structuredClone; });
+  const p2 = await c2.newPage();
+  await p2.goto(URL_);
+  await p2.waitForSelector('#unsupported');
+  assert.match(await p2.locator('#unsupported').textContent(), /Android System WebView/);
+  assert.equal(await p2.evaluate(() => document.documentElement.dataset.ready), undefined, '本体は読み込まない');
+  await c2.close();
+});
+
 await step('コンソールエラーなし', async () => {
   assert.deepEqual(errors, []);
 });

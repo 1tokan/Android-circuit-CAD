@@ -7,6 +7,9 @@ on:
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: android-device-test
   cancel-in-progress: true
@@ -18,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api-level: [30, 34]
+        api-level: [30, 34, 35]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,3 +56,16 @@ jobs:
         with:
           name: device-test-api${{ matrix.api-level }}
           path: tests/device/out
+      # 結果を device-test-api<番号> ブランチにも置く（成果物のダウンロードが使えない環境から確認するため）
+      - name: Publish results
+        if: always()
+        run: |
+          mkdir -p pub && cp -r tests/device/out/. pub/ 2>/dev/null || true
+          printf 'commit: %s\nrun: %s\n' "${{ github.sha }}" "${{ github.run_id }}" > pub/RUN.txt
+          cd pub
+          git init -q -b device-test-api${{ matrix.api-level }}
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git add -A
+          git commit -q -m "device test api${{ matrix.api-level }} (${{ github.sha }})"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" device-test-api${{ matrix.api-level }}

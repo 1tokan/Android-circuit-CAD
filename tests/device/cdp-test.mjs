@@ -61,8 +61,26 @@ const back = async () => { adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); aw
 await send('Runtime.enable');
 await send('Page.enable');
 
+// 古い WebView（98 未満）では本体を読み込まず案内を出す。その表示を確かめて終わる
+for (let i = 0; i < 60; i++) { if (await evaluate("document.documentElement.dataset.ready === '1' || !!document.documentElement.dataset.unsupported")) break; await sleep(500); }
+const unsupported = await evaluate('document.documentElement.dataset.unsupported || null');
+if (unsupported) {
+  await step(`古い WebView（Chrome ${unsupported}）では更新を案内する`, async () => {
+    const t = await evaluate("document.querySelector('#unsupported')?.textContent || ''");
+    if (!/WebView/.test(t) || !/更新/.test(t)) throw new Error('案内が出ない: ' + t);
+    await shot('01-unsupported-webview');
+    report.device = { unsupportedWebView: unsupported, ua: await evaluate('navigator.userAgent') };
+    return { chrome: unsupported };
+  });
+  await step('JavaScript のエラーなし', async () => { if (consoleErrors.length) throw new Error(consoleErrors.join('\n')); });
+  fs.writeFileSync(`${OUT}/report.json`, JSON.stringify(report, null, 2));
+  const ng = results.filter((r) => !r.ok);
+  log(`\n${results.length - ng.length}/${results.length} passed（古い WebView のため案内の確認のみ）`);
+  ws.close();
+  process.exit(ng.length ? 1 : 0);
+}
+
 await step('起動: アプリ版として読み込まれ、保存先が使える', async () => {
-  for (let i = 0; i < 60; i++) { if (await evaluate("document.documentElement.dataset.ready === '1'")) break; await sleep(500); }
   const info = await evaluate(`({ ready: document.documentElement.dataset.ready, version: window.pocketEDA.version, native: window.pocketEDA.native, ua: navigator.userAgent, w: innerWidth, h: innerHeight, dpr: devicePixelRatio, plugins: Object.keys(Capacitor.Plugins || {}).filter((k) => ['App', 'Filesystem', 'Share'].includes(k)).sort() })`);
   if (info.ready !== '1' || !info.native) throw new Error(JSON.stringify(info));
   if (info.plugins.join() !== 'App,Filesystem,Share') throw new Error('プラグイン不足: ' + info.plugins);

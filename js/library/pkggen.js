@@ -208,10 +208,10 @@ export function generateFootprint(kind, pkg) {
       const fam = m[1], n = Number(m[2]);
       const wide = /300MIL|W7\.5|-W7/.test(p);
       let pitch = prm.pitch, bodyW = prm.w, ls = prm.ls;
-      if (fam === 'SOP' || fam === 'ESOP' || fam === 'SOIC') { pitch ??= 1.27; bodyW ??= wide ? 7.5 : 3.9; ls ??= wide ? 10.3 : 6.0; }
-      else if (/TSSOP/.test(fam)) { pitch ??= 0.65; bodyW ??= 4.4; ls ??= 6.4; }
-      else if (/MSOP|VSSOP/.test(fam)) { pitch ??= n >= 10 ? 0.5 : 0.65; bodyW ??= 3.0; ls ??= 4.9; }
-      else if (fam === 'SSOP') { pitch ??= n <= 24 && !/W5\.3/.test(p) ? 0.635 : 0.65; bodyW ??= pitch === 0.635 ? 3.9 : 5.3; ls ??= pitch === 0.635 ? 6.0 : 7.8; }
+      if (fam === 'SOP' || fam === 'ESOP' || fam === 'SOIC') { pitch = pitch ?? 1.27; bodyW = bodyW ?? (wide ? 7.5 : 3.9); ls = ls ?? (wide ? 10.3 : 6.0); }
+      else if (/TSSOP/.test(fam)) { pitch = pitch ?? 0.65; bodyW = bodyW ?? 4.4; ls = ls ?? 6.4; }
+      else if (/MSOP|VSSOP/.test(fam)) { pitch = pitch ?? (n >= 10 ? 0.5 : 0.65); bodyW = bodyW ?? 3.0; ls = ls ?? 4.9; }
+      else if (fam === 'SSOP') { pitch = pitch ?? (n <= 24 && !/W5\.3/.test(p) ? 0.635 : 0.65); bodyW = bodyW ?? (pitch === 0.635 ? 3.9 : 5.3); ls = ls ?? (pitch === 0.635 ? 6.0 : 7.8); }
       if (n % 2 === 0 && n >= 4) {
         g = gullwing(n, pitch, ls, bodyW, prm.ep || /^E|^HT/.test(fam));
         desc = `${fam}-${n} P${pitch} 端子間${ls}`;
