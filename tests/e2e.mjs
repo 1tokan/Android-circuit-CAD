@@ -48,13 +48,15 @@ await step('スマホ縦画面: 上部・タブ・キャンバス・下部ツー
   await page.screenshot({ path: `${OUT}/phone-portrait.png` });
 });
 
-await step('未実装の作業領域(出力)は「未実装」と表示し、ツールは無効', async () => {
+await step('未実装の機能（BOM・CPL）はツールが無効で「未実装」と表示', async () => {
   await page.locator('#ws-nav button[data-ws="output"]').click();
-  assert.ok(await page.locator('#stage-overlay').isVisible());
-  assert.match(await page.locator('#stage-overlay').textContent(), /未実装/);
-  assert.equal(await page.locator('#toolbar .tool:not([disabled])').count(), 0);
-  assert.match(await page.locator('#stage-overlay').textContent(), /Gerber/);
   assert.equal(await page.locator('#ws-nav button[aria-current="page"]').getAttribute('data-ws'), 'output');
+  for (const id of ['bom', 'cpl']) {
+    const b = page.locator(`#toolbar .tool[data-tool="${id}"]`);
+    assert.ok(await b.isDisabled(), id);
+    assert.match(await b.getAttribute('title'), /未実装・第7段階/);
+  }
+  assert.match(await page.locator('#module-status').textContent(), /BOM・CPL生成未実装/);
   await page.locator('#ws-nav button[data-ws="schematic"]').click();
   assert.ok(!(await page.locator('#stage-overlay').isVisible()), '回路図はキャンバスを塞がない');
   assert.ok(await page.locator('#toolbar .tool:not([disabled])').count() >= 8);

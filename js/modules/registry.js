@@ -8,10 +8,10 @@ export const MODULES = [
   { id: 'library',   name: '電子部品ライブラリ',     stage: 3, status: 'ready' },
   { id: 'lcsc',      name: 'LCSC部品検索・管理',     stage: 3, status: 'ready', note: '公式APIは非使用（CSV/JSON取込・手動登録・LCSCリンク）' },
   { id: 'netlist',   name: 'ネットリスト生成',       stage: 3, status: 'ready' },
-  { id: 'pcb',       name: 'PCBレイアウトエディタ',  stage: 4, status: 'ready', note: 'ベタの塗りつぶし形状（クリアランス抜き）は第6段階で計算。自動配線・3D表示は将来' },
+  { id: 'pcb',       name: 'PCBレイアウトエディタ',  stage: 4, status: 'ready', note: '自動配線・3D表示は将来' },
   { id: 'erc',       name: 'ERC（電気的ルール）',    stage: 5, status: 'ready', note: '1シートのみ。汎用ICのピン属性は「双方向」扱い（検査結果に未検査項目を表示）' },
-  { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'ready', note: 'ベタの間隔・島切れは第6段階（塗りつぶし計算）まで未検査' },
-  { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'planned' },
+  { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'ready', note: 'ベタの細いくびれ・レジストのブリッジ幅は未検査' },
+  { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'ready', note: 'RS-274X X2・Excellon・ZIP。ベタの塗りつぶし（クリアランス・サーマル・島除去）を含む' },
   { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'planned' },
 ];
 
@@ -57,7 +57,11 @@ export const TOOLS = {
     { id: 'drc', label: 'DRC実行', icon: 'M4 4h16v16H4zM8 8h3v3H8zM13 13h3v3h-3zM11 9.5h4v3.5' },
     { id: 'rules', label: 'ルール', icon: 'M5 6h14M5 12h14M5 18h14M9 4v4M15 10v4M8 16v4' },
   ],
-  output: [{ id: 'gerber', label: 'Gerber' }, { id: 'bom', label: 'BOM' }, { id: 'cpl', label: 'CPL' }],
+  output: [
+    { id: 'gerber', label: 'Gerber書出', module: 'gerber', icon: 'M12 4v11M7 10l5 5 5-5M5 20h14' },
+    { id: 'bom', label: 'BOM', module: 'bomcpl', icon: 'M5 5h14v14H5zM5 10h14M5 15h14M10 5v14' },
+    { id: 'cpl', label: 'CPL', module: 'bomcpl', icon: 'M12 3v4M12 17v4M3 12h4M17 12h4M12 9a3 3 0 1 0 0 6a3 3 0 0 0 0-6z' },
+  ],
 };
 
 export function moduleById(id) { return MODULES.find((m) => m.id === id); }

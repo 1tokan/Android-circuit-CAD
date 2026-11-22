@@ -3,11 +3,12 @@
 //  - 配線の端点がパッドの銅箔内（同じ層。スルーホールは両層）
 //  - 配線の端点が、同じ層の他の配線の端点または線上（線幅の半分以内）
 //  - 配線の端点・パッドがビアの銅箔内（ビアは両層）
-//  - ベタ: そのネットのパッド・ビア・配線端点がベタの範囲内（同じ層）
-//    ※ ベタの島切れ（クリアランスで分断されて届かない）は第5段階DRC・第6段階の塗りつぶし計算で検査する（推定）
+//  - ベタ: 塗りつぶし計算（zonefill.js）の結果の「島」ごとに、そのネットのパッド中心・ビア・配線端点が島の中にあれば接続
+//    （クリアランスで分断された島どうしはつながらない）
 // 配線のネットは「始点のネット」で付けるが、接続はすべて形状から計算し直す。
 
-import { allPads, pointInPad, pointInPolygon, distToSeg, toMm } from './model.js';
+import { allPads, pointInPad, distToSeg, toMm } from './model.js';
+import { cachedFills, pointInPolyWithHoles } from './zonefill.js';
 
 class DSU {
   constructor() { this.p = new Map(); }
@@ -19,16 +20,15 @@ class DSU {
 const mm = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
 const EPS = 1e-4; // 0.1µm
 
-export function computePcbConnectivity(pcb) {
+/** @param opt { rules: 設計ルール（ベタのクリアランス）, allowStaleFill: ドラッグ中は前回の塗りつぶしを使う } */
+export function computePcbConnectivity(pcb, { rules = {}, allowStaleFill = false } = {}) {
   const dsu = new DSU();
   const pads = allPads(pcb);
   const tracks = pcb.tracks.map((t) => ({ t, a: mm(t.a), b: mm(t.b), hw: toMm(t.width) / 2 }));
   const vias = pcb.vias.map((v) => ({ v, c: mm(v), r: toMm(v.diameter) / 2 }));
-  const zones = pcb.zones.map((z) => ({ z, poly: z.polygon.map(mm) }));
   pads.forEach((p) => dsu.add(p.key));
   tracks.forEach(({ t }) => dsu.add(`t:${t.id}`));
   vias.forEach(({ v }) => dsu.add(`v:${v.id}`));
-  zones.forEach(({ z }) => dsu.add(`z:${z.id}`));
 
   // 配線の端点
   for (const tr of tracks) {
@@ -44,13 +44,18 @@ export function computePcbConnectivity(pcb) {
   }
   // ビアとパッドの重なり（パッド上のビア）
   for (const vi of vias) for (const p of pads) if (pointInPad(p.inst, p.pad, vi.c.x, vi.c.y)) dsu.union(`v:${vi.v.id}`, p.key);
-  // ベタ（同ネットのものだけ。推定）
-  for (const zo of zones) {
-    if (!zo.z.net) continue;
-    const key = `z:${zo.z.id}`;
-    for (const p of pads) if (p.net === zo.z.net && p.layers.includes(zo.z.layer) && pointInPolygon(p, zo.poly)) dsu.union(key, p.key);
-    for (const vi of vias) if (vi.v.net === zo.z.net && pointInPolygon(vi.c, zo.poly)) dsu.union(key, `v:${vi.v.id}`);
-    for (const tr of tracks) if (tr.t.layer === zo.z.layer && tr.t.net === zo.z.net && (pointInPolygon(tr.a, zo.poly) || pointInPolygon(tr.b, zo.poly))) dsu.union(key, `t:${tr.t.id}`);
+  // ベタ（塗りつぶしの島ごと）
+  const { fills, stale: fillStale } = cachedFills(pcb, rules, { allowStale: allowStaleFill });
+  for (const z of pcb.zones) {
+    const f = fills.get(z.id);
+    if (!z.net || !f) continue;
+    f.polygons.forEach((poly, i) => {
+      const key = `z:${z.id}:${i}`;
+      dsu.add(key);
+      for (const p of pads) if (p.net === z.net && p.layers.includes(z.layer) && pointInPolyWithHoles(p, poly)) dsu.union(key, p.key);
+      for (const vi of vias) if (vi.v.net === z.net && pointInPolyWithHoles(vi.c, poly)) dsu.union(key, `v:${vi.v.id}`);
+      for (const tr of tracks) if (tr.t.layer === z.layer && tr.t.net === z.net && (pointInPolyWithHoles(tr.a, poly) || pointInPolyWithHoles(tr.b, poly))) dsu.union(key, `t:${tr.t.id}`);
+    });
   }
 
   // ネットごとにパッドの島を作り、島どうしを最短で結ぶ（最小全域木）
@@ -98,7 +103,7 @@ export function computePcbConnectivity(pcb) {
   }
   const shorts = [...netsOfGroup.values()].filter((s) => s.size > 1).map((s) => [...s].sort());
 
-  return { ratsnest, unrouted: ratsnest.length, netStatus, shorts, groupOf: (key) => dsu.find(key) };
+  return { ratsnest, unrouted: ratsnest.length, netStatus, shorts, groupOf: (key) => dsu.find(key), fills, fillStale };
 }
 
 /** 点 p(mm) に接続できる対象（パッド中心・配線端点・ビア）を探して吸着点とネットを返す */

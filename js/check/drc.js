@@ -6,30 +6,14 @@
 
 import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg } from '../pcb/model.js';
 import { computePcbConnectivity } from '../pcb/connectivity.js';
-import { padShape, trackShape, circleShape, silkSegments, refdesPos, textPoly } from '../pcb/shapes.js';
+import { padShape, trackShape, circleShape, silkSegments, silkTexts } from '../pcb/shapes.js';
+import { SILK_LINE_MM, unsupportedChars } from '../pcb/text.js';
 import { fpToBoard } from '../pcb/model.js';
 import { shapeDist, shapeSegDist, shapeBox, boxesNear, shapeCenter, nearestPoint } from './geom2d.js';
 import { hash, sourceHash } from '../netlist/netlist.js';
 
-export const DRC_DEFAULTS = {
-  minTrackWidthMm: 0.127,      // 配線幅（1〜2層）
-  minClearanceMm: 0.127,       // 銅どうしの間隔（配線-配線・パッド-パッド・ビア）
-  minPadClearanceMm: 0.2,      // パッド-配線、パッド-ビア
-  boardEdgeClearanceMm: 0.3,   // 銅と基板外形
-  minViaDrillMm: 0.3,
-  minViaDiameterMm: 0.5,
-  minViaAnnularMm: 0.1,        // (外径-穴径)/2
-  minAnnularRingMm: 0.13,      // スルーホールパッドのランド幅
-  minPthDrillMm: 0.2,
-  maxDrillMm: 6.35,
-  minHoleToHoleMm: 0.5,        // 異なるネットの穴どうし（穴の縁から縁）
-  minNpthToCopperMm: 0.254,    // 取付穴（非メッキ）と銅
-  minSilkToPadMm: 0.15,        // シルクとパッド
-};
-
-export function drcRules(project) {
-  return { ...DRC_DEFAULTS, ...(project.board?.rules || {}) };
-}
+export { DRC_DEFAULTS, drcRules } from './rules.js';
+import { drcRules } from './rules.js';
 
 export const DRC_RULES = [
   { id: 'track_width', label: '配線幅の最小値' },
@@ -47,16 +31,17 @@ export const DRC_RULES = [
   { id: 'courtyard_overlap', label: '同じ面の部品どうしの重なり（外形枠）' },
   { id: 'silk_pad', label: 'シルク（部品番号・文字・他部品の外形線）とパッドの重なり（文字幅は推定）' },
   { id: 'silk_outside', label: '基板の外のシルク文字' },
+  { id: 'silk_size', label: 'シルク文字の高さ・線幅、出力できない文字（ASCII以外）' },
+  { id: 'zone_fill', label: 'ベタの塗りつぶし: 別ネットの銅とのクリアランス（計算結果を独立に再検査）・取り除いた島・空のベタ' },
   { id: 'netlist_sync', label: '回路図（ネットリスト）との一致・未配置の部品' },
   { id: 'footprint_unverified', label: '未照合・自動生成のフットプリント' },
-  { id: 'zone_estimated', label: 'ベタによる接続（推定であることの注意）' },
+  { id: 'zone_overlap', label: '同じ層で重なる別ネットのベタ' },
 ];
 
 export const DRC_UNCHECKED = [
-  'ベタ（塗りつぶし）とほかの銅の間隔・ベタの島切れ・サーマル（塗りつぶし形状の計算は第6段階）。ベタ経由の接続は「推定」として扱います',
-  'ソルダーマスク（レジスト）の開口・ブリッジ幅',
+  'ベタの細い部分（最小幅）の除去。細いくびれが残ることがあります',
+  'ソルダーマスクのブリッジ幅（狭いピッチのパッド間のレジスト残り）',
   'メタルマスク（ペースト）',
-  'シルクの線幅・文字高さの最小値（文字の太さはGerber生成時に決まるため第6段階）',
   '銅の細片（スリバー）・鋭角部（アシッドトラップ）',
   '部品の高さ・3D干渉',
   '取付穴（非メッキ）の穴径の範囲',
@@ -81,7 +66,7 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   const edges = [[{ x: br.x0, y: br.y0 }, { x: br.x1, y: br.y0 }], [{ x: br.x1, y: br.y0 }, { x: br.x1, y: br.y1 }], [{ x: br.x1, y: br.y1 }, { x: br.x0, y: br.y1 }], [{ x: br.x0, y: br.y1 }, { x: br.x0, y: br.y0 }]];
   const inside = (p) => p.x >= br.x0 && p.x <= br.x1 && p.y >= br.y0 && p.y <= br.y1;
 
-  const conn = computePcbConnectivity(pcb);
+  const conn = computePcbConnectivity(pcb, { rules: R });
   const pads = allPads(pcb);
 
   // ---- 銅の要素と実効ネット ----
@@ -229,33 +214,41 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   }
 
   // ---- シルク ----
+  // 文字は実際に出力するストローク（太さ込み）で判定する
   const padsOnSide = (side) => items.filter((it) => it.kind === 'pad' && it.layers.includes(side === 'bottom' ? 'B.Cu' : 'F.Cu'));
-  const silkHits = (poly, side, exceptInst = null) => padsOnSide(side).filter((it) => it.inst !== exceptInst && shapeDist(poly, it.shape) < R.minSilkToPadMm - 1e-6);
   const unplaced = new Set(issues.filter((i) => i.rule === 'outside_board' && i.level === 'error').map((i) => i.refs[0]));
+  for (const t of silkTexts(pcb)) {
+    if (t.kind === 'refdes' && unplaced.has(t.text)) continue;
+    const name = t.kind === 'refdes' ? `部品番号 ${t.text}` : `文字「${t.text}」`;
+    const refs = t.kind === 'refdes' ? [t.text] : [];
+    const side = t.layer === 'B.SilkS' ? 'bottom' : 'top';
+    const pads2 = padsOnSide(side);
+    const hits = new Set();
+    for (const st of t.strokes) for (let k = 1; k < st.length; k++) {
+      const seg = { type: 'cap', a: st[k - 1], b: st[k], r: t.width / 2 };
+      const sb = shapeBox(seg);
+      for (const it of pads2) if (boxesNear(sb, it.box, R.minSilkToPadMm) && shapeDist(seg, it.shape) < R.minSilkToPadMm - 1e-6) hits.add(it);
+    }
+    if (hits.size) add('warning', 'silk_pad', `${name} のシルクがパッド ${[...hits].slice(0, 3).map((h) => h.label).join(', ')} にかかっています（製造時に削られます）`, refs, t.at);
+    if (!inside(t.at)) add('warning', 'silk_outside', `${name} が基板の外です`, refs, t.at);
+    if (t.size + 1e-9 < R.minSilkTextHeightMm) add('warning', 'silk_size', `${name} の高さ ${fmt(t.size)}mm が最小 ${R.minSilkTextHeightMm}mm 未満です（読めなくなります）`, refs, t.at);
+    if (t.width + 1e-9 < R.minSilkWidthMm) add('warning', 'silk_size', `${name} の線幅 ${fmt(t.width)}mm が最小 ${R.minSilkWidthMm}mm 未満です`, refs, t.at);
+    const bad = unsupportedChars(t.text);
+    if (bad.length) add('error', 'silk_size', `${name} に出力できない文字があります: ${bad.join(' ')}（英数字・記号のみ。「?」で出力されます）`, refs, t.at);
+  }
+  if (SILK_LINE_MM < R.minSilkWidthMm) add('warning', 'silk_size', `部品外形のシルク線幅 ${SILK_LINE_MM}mm が最小 ${R.minSilkWidthMm}mm 未満です`, [], null);
   for (const f of pcb.footprints) {
     if (unplaced.has(f.ref)) continue;
-    const rp = refdesPos(f);
-    const poly = textPoly(rp.x, rp.y, rp.size, f.ref, 0, 'alphabetic');
-    const hits = silkHits(poly, f.side);
-    if (hits.length) add('warning', 'silk_pad', `部品番号 ${f.ref} のシルクがパッド ${hits.slice(0, 3).map((h) => h.label).join(', ')} にかかっています（推定）`, [f.ref], rp);
-    if (!inside(rp)) add('warning', 'silk_outside', `部品番号 ${f.ref} のシルクが基板の外です`, [f.ref], rp);
     // 外形線は自分のパッドの周りで切ってあるので、他の部品のパッドとだけ比べる
     const segs = silkSegments(f.fpDef);
     const others = padsOnSide(f.side).filter((it) => it.inst !== f);
     let hit = null;
-    for (const s of segs) {
-      const a = fpToBoard(f, s.a.x, s.a.y), b = fpToBoard(f, s.b.x, s.b.y);
-      hit = others.find((it) => shapeSegDist(it.shape, a, b) < R.minSilkToPadMm - 1e-6);
+    for (const s2 of segs) {
+      const a = fpToBoard(f, s2.a.x, s2.a.y), b = fpToBoard(f, s2.b.x, s2.b.y);
+      hit = others.find((it) => shapeSegDist(it.shape, a, b) - SILK_LINE_MM / 2 < R.minSilkToPadMm - 1e-6);
       if (hit) break;
     }
     if (hit) add('warning', 'silk_pad', `${f.ref} の外形線のシルクが ${hit.label} のパッドにかかっています`, [f.ref, hit.ref], shapeCenter(hit.shape));
-  }
-  for (const t of pcb.texts) {
-    const x = toMm(t.x), y = toMm(t.y);
-    const poly = textPoly(x, y, toMm(t.size), t.text, t.rot || 0, 'central');
-    const hits = silkHits(poly, t.layer === 'B.SilkS' ? 'bottom' : 'top');
-    if (hits.length) add('warning', 'silk_pad', `文字「${t.text}」のシルクがパッド ${hits.slice(0, 3).map((h) => h.label).join(', ')} にかかっています（推定）`, [], { x, y });
-    if (!inside({ x, y })) add('warning', 'silk_outside', `文字「${t.text}」が基板の外です`, [], { x, y });
   }
 
   // ---- 回路図との一致 ----
@@ -274,11 +267,40 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   if (unver.length) add('warning', 'footprint_unverified', `寸法が未照合のフットプリント（第6段階で KiCad 公式データと照合）: ${unver.join(', ')}`, unver, null);
 
   // ---- ベタ ----
+  // 塗りつぶし結果の外周・穴の辺を、別ネットの銅と比べ直す（塗りつぶし計算の独立した検算）
+  const fills = conn.fills || new Map();
   for (const z of pcb.zones) {
-    if (!z.net) add('warning', 'zone_estimated', `${z.layer} のベタにネットが設定されていません`, [], null);
+    const f = fills.get(z.id);
+    const zc = f?.params?.clearance ?? 0.3;
+    if (!z.net) add('warning', 'zone_fill', `${z.layer} のベタにネットが設定されていません（どこにもつながりません）`, [], null);
+    if (!f) continue;
+    if (!f.polygons.length) add('warning', 'zone_fill', `${z.layer} のベタ（${z.net || 'ネットなし'}）は塗れる場所がありません`, [], null);
+    if (f.islandsRemoved) add('warning', 'zone_fill', `${z.layer} のベタ（${z.net}）: どこにもつながらない島を ${f.islandsRemoved} か所取り除きました`, [], null);
+    const need = Math.min(zc, R.minClearanceMm) - 0.002; // 円の近似誤差を見込む
+    const others = items.filter((it) => it.layers.includes(z.layer) && it.net !== z.net);
+    let found = 0;
+    for (const poly of f.polygons) for (const ring of poly) for (let k = 1; k < ring.length && found < 5; k++) {
+      const a = { x: ring[k - 1][0], y: ring[k - 1][1] }, b = { x: ring[k][0], y: ring[k][1] };
+      const sb = { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) };
+      for (const it of others) {
+        if (!boxesNear(sb, it.box, zc)) continue;
+        if (shapeSegDist(it.shape, a, b) < need) { found++; add('error', 'zone_fill', `${z.layer} のベタ（${z.net}）と ${it.label}（${netName(it.net)}）の間隔が不足しています`, it.ref ? [it.ref] : [], a); break; }
+      }
+    }
+    for (const poly of f.polygons) {
+      // 別ネットの銅がベタの中に埋まっていないか（中心点で確認）
+      for (const it of others) {
+        const c = shapeCenter(it.shape);
+        if (it.kind !== 'track' && pointInRing(c, poly[0]) && !poly.slice(1).some((h) => pointInRing(c, h))) { add('error', 'zone_fill', `${it.label}（${netName(it.net)}）が ${z.net} のベタに埋まっています（短絡）`, it.ref ? [it.ref] : [], c); }
+      }
+    }
   }
-  const zoneNets = [...new Set(pcb.zones.filter((z) => z.net).map((z) => z.net))];
-  if (zoneNets.length) add('warning', 'zone_estimated', `ネット ${zoneNets.join(', ')} はベタの範囲内のパッドを「接続済み」とみなしています（推定）。島切れ・クリアランスは第6段階の塗りつぶし計算まで未検査です`, [], null);
+  for (let i = 0; i < pcb.zones.length; i++) for (let j = i + 1; j < pcb.zones.length; j++) {
+    const a = pcb.zones[i], b = pcb.zones[j];
+    if (a.layer !== b.layer || a.net === b.net) continue;
+    const ba = polyBox(a.polygon), bb = polyBox(b.polygon);
+    if (ba.x0 < bb.x1 && bb.x0 < ba.x1 && ba.y0 < bb.y1 && bb.y0 < ba.y1) add('error', 'zone_overlap', `${a.layer} で ${a.net || 'ネットなし'} と ${b.net || 'ネットなし'} のベタの範囲が重なっています（重なるベタの塗り分けは未対応のため、範囲を分けてください）`, [], null);
+  }
 
   if (dropped) issues.push({ level: 'warning', rule: 'limit', message: `ほかに ${dropped} 件あります（先頭 ${limit} 件のみ表示）`, refs: [], at: null });
   issues.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1));
@@ -306,3 +328,16 @@ export function drcStatus(project, pcb) {
 
 function mid(t) { return { x: toMm(t.a.x + t.b.x) / 2, y: toMm(t.a.y + t.b.y) / 2 }; }
 function midPt(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+function pointInRing(p, ring) {
+  let ins = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) ins = !ins;
+  }
+  return ins;
+}
+function polyBox(poly) {
+  const xs = poly.map((q) => toMm(q.x)), ys = poly.map((q) => toMm(q.y));
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}

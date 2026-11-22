@@ -1,5 +1,6 @@
 // PCB 要素 → 2D 形状（DRC・シルク生成で使う。単位 mm、基板座標）
-import { toMm, fpToBoard, padLayers } from './model.js';
+import { toMm, fpToBoard, padLayers, fpBox } from './model.js';
+import { textStrokes, strokeWidthFor } from './text.js';
 
 /** パッドの形状（角形・角丸は四角形として保守的に扱う） */
 export function padShape(inst, pad) {
@@ -71,19 +72,29 @@ export { padLayers };
 
 /** 部品番号（シルク文字）の位置。描画と DRC で同じ式を使う */
 export function refdesPos(inst) {
-  const c = inst.fpDef.courtyard;
-  const top = fpToBoard({ ...inst, rot: 0 }, 0, c.y0 - 0.3);
-  return { x: toMm(inst.x), y: Math.min(top.y, toMm(inst.y) - 0.3), size: 0.9 };
+  // 回転後の外形枠（外接矩形）の上に置く
+  const b = fpBox(inst);
+  return { x: (b.x0 + b.x1) / 2, y: b.y0 - 0.3, size: 1.0 };
 }
 
 /**
- * シルク文字の占める範囲の推定（四角形 poly）。字幅はフォント依存なので 0.62×文字高 で近似。
- * baseline: 'alphabetic'（y が文字の下端付近）| 'central'（y が文字の中心）。中央揃え。
+ * シルクの文字すべて（部品番号とユーザー文字）。描画・DRC・Gerber で共通。
+ * @returns [{ kind:'refdes'|'text', id, layer:'F.SilkS'|'B.SilkS', text, strokes:[[{x,y}...]...], width, at:{x,y}, size }]
  */
-export function textPoly(x, y, size, text, rot = 0, baseline = 'alphabetic') {
-  const n = [...String(text)].reduce((s, ch) => s + (/[\u0000-ÿ]/.test(ch) ? 1 : 1.6), 0);
-  const w = Math.max(size * 0.4, n * size * 0.62);
-  const y0 = baseline === 'central' ? -size / 2 : -size * 0.78, y1 = baseline === 'central' ? size / 2 : size * 0.12;
-  const a = (rot * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
-  return { type: 'poly', pts: [[-w / 2, y0], [w / 2, y0], [w / 2, y1], [-w / 2, y1]].map(([dx, dy]) => ({ x: x + dx * c - dy * s, y: y + dx * s + dy * c })) };
+export function silkTexts(pcb) {
+  const out = [];
+  for (const f of pcb.footprints) {
+    if (f.hideRef) continue;
+    const rp = refdesPos(f);
+    const bottom = f.side === 'bottom';
+    out.push({ kind: 'refdes', id: f.id, inst: f, layer: bottom ? 'B.SilkS' : 'F.SilkS', text: f.ref, size: rp.size, width: strokeWidthFor(rp.size), at: { x: rp.x, y: rp.y },
+      strokes: textStrokes(f.ref, { x: rp.x, y: rp.y, size: rp.size, mirror: bottom, align: 'center', valign: 'baseline' }) });
+  }
+  for (const t of pcb.texts) {
+    const size = toMm(t.size), x = toMm(t.x), y = toMm(t.y);
+    const bottom = t.layer === 'B.SilkS';
+    out.push({ kind: 'text', id: t.id, layer: bottom ? 'B.SilkS' : 'F.SilkS', text: t.text, size, width: t.width ? toMm(t.width) : strokeWidthFor(size), at: { x, y },
+      strokes: textStrokes(t.text, { x, y, size, rot: t.rot || 0, mirror: bottom, align: 'center', valign: 'center' }) });
+  }
+  return out;
 }

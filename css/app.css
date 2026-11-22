@@ -339,6 +339,16 @@ button { font: inherit; color: inherit; }
 #pcb-content .zone.fcu { fill: var(--fcu); stroke: var(--fcu); }
 #pcb-content .zone.bcu { fill: var(--bcu); stroke: var(--bcu); }
 #pcb-content .zone.sel { stroke: var(--sel); opacity: .5; }
+#pcb-content .zone.outline-only { fill: none; opacity: .6; }
+#pcb-content .zone-fill { opacity: .45; stroke: none; }
+#pcb-content .cu-layer.active .zone-fill { opacity: .6; }
+#pcb-content .zone-fill.fcu { fill: var(--fcu); }
+#pcb-content .zone-fill.bcu { fill: var(--bcu); }
+#pcb-content .zone-fill.stale { opacity: .25; }
+#pcb-content .zone-fill.sel { fill: #ffd27a; }
+#pcb-content .silk-stroke { fill: none; stroke: var(--silk); stroke-linecap: round; stroke-linejoin: round; }
+#pcb-content .silk-stroke.bottom { stroke: #a8b6ff; opacity: .6; }
+#pcb-content .silk-stroke.sel { stroke: #ffd27a; }
 #pcb-content .pad.fcu { fill: var(--fcu); }
 #pcb-content .pad.bcu { fill: var(--bcu); }
 #pcb-content .pad.tht { fill: var(--tht); }
@@ -400,3 +410,14 @@ button { font: inherit; color: inherit; }
 .rule-row input { width: 100%; }
 .check-marker circle, .check-marker path { fill: none; stroke: #ff3df0; }
 .check-marker { pointer-events: none; }
+
+/* ---- 出力（Gerber） ---- */
+.plot-preview { width: 100%; max-height: 60vh; background: #111; border-radius: 8px; display: block; margin-top: 8px; }
+.plot-preview .stroke { fill: none; }
+.plot-preview circle, .plot-preview rect, .plot-preview polygon, .plot-preview path { stroke: none; }
+.plot-preview .stroke-fill { stroke: var(--c); fill: var(--c); }
+.chips .chip i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.out-wrap .opt { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; }
+.files { list-style: none; padding: 0; margin: 4px 0; font-size: 13px; }
+.files li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.howto { font-size: 13px; padding-left: 20px; line-height: 1.6; }

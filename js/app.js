@@ -20,9 +20,11 @@ import { generateNetlist, netlistStatus, formatNetlistText } from './netlist/net
 import { createCheckView } from './check/view.js';
 import { ercStatus } from './check/erc.js';
 import { drcStatus } from './check/drc.js';
+import { createOutputView } from './output/view.js';
+import { moduleById } from './modules/registry.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 
 const state = {
   project: null,
@@ -38,6 +40,7 @@ const state = {
   online: createJlcsearch(),
   partsView: null,
   checkView: null,
+  outputView: null,
   marker: null, // 検査結果の「表示」で示す位置 {ws, x, y}
   assign: null, // 部品データの割り当て先 {key, ref}
 };
@@ -103,6 +106,7 @@ export function mutateProject(fn, reason = 'edit') {
   renderHeader();
   renderUndo();
   if (state.workspace === 'check' && state.checkView && !String(reason).startsWith('check:')) state.checkView.render();
+  if (state.workspace === 'output' && state.outputView && !String(reason).startsWith('check:')) state.outputView.render();
 }
 
 /** 回路図の編集（元に戻す履歴に積む）。変化が無ければ保存もしない */
@@ -202,18 +206,20 @@ function renderToolbar() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'tool';
-    b.disabled = !enabled;
-    b.title = enabled ? t.label : `${t.label}（未実装）`;
+    const on = enabled && (!t.module || moduleById(t.module).status !== 'planned');
+    b.disabled = !on;
+    b.title = on ? t.label : `${t.label}（未実装・第${moduleById(t.module || ws.modules[0]).stage}段階）`;
     b.dataset.tool = t.id;
     if (enabled && activeEditor()?.state.tool === t.id) b.classList.add('on');
     b.innerHTML = `<svg class="ico" viewBox="0 0 24 24"><path d="${t.icon || 'M5 5h14v14H5z'}"/></svg>${t.label}`;
-    if (enabled) b.onclick = () => { onTool(t.id); };
+    if (on) b.onclick = () => { onTool(t.id); };
     return b;
   }));
 }
 
 function onTool(id) {
   if (state.workspace === 'parts') { state.partsView.action(id); return; }
+  if (state.workspace === 'output') { if (id === 'gerber') state.outputView.exportZip(); return; }
   if (state.workspace === 'check') {
     if (id === 'rules') state.checkView.editRules();
     else state.checkView.run(id);
@@ -259,6 +265,12 @@ function usePartInProject(part) {
 }
 function switchWorkspace(id) { state.workspace = id; renderAll(); }
 
+function toBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 /** Android アプリ版（Capacitor）で動いているか */
 const NATIVE = !!globalThis.Capacitor?.isNativePlatform?.();
 
@@ -267,10 +279,13 @@ const NATIVE = !!globalThis.Capacitor?.isNativePlatform?.();
  * キャッシュに書いてから共有シート（Googleドライブ・ファイル・メール等へ保存・送信）を開く。
  */
 async function download(name, text, type = 'text/plain') {
+  const binary = text instanceof Uint8Array;
   if (NATIVE) {
     const { Filesystem, Share } = globalThis.Capacitor.Plugins;
     try {
-      const r = await Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
+      const r = binary
+        ? await Filesystem.writeFile({ path: name, data: toBase64(text), directory: 'CACHE' }) // encoding 無し = base64 のバイナリ
+        : await Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
       await Share.share({ title: name, files: [r.uri], dialogTitle: `${name} を保存・共有` });
     } catch (e) {
       if (!/cancel/i.test(String(e?.message))) toast('書き出せませんでした: ' + (e?.message || e), true);
@@ -278,6 +293,7 @@ async function download(name, text, type = 'text/plain') {
     return;
   }
   const blob = new Blob([text], { type });
+  state.lastDownload = { name, size: blob.size, type }; // テスト・確認用
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -290,11 +306,11 @@ async function download(name, text, type = 'text/plain') {
 // ---------------- ネットリスト ----------------
 async function renderPcbSidePanel(el) {
   const pcb = ensurePcb(state.project);
-  const conn = state.pcbEditor.connectivity();
+  const conn = state.pcbEditor.lastConnectivity();
   const row = (k, v) => `<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`;
   let html = `<h2>PCB</h2>` + row('基板サイズ', `${toMm(pcb.outline.w).toFixed(1)} × ${toMm(pcb.outline.h).toFixed(1)} mm`) +
     row('部品', pcb.footprints.length) + row('配線', pcb.tracks.length) + row('ビア', pcb.vias.length) + row('ベタ', pcb.zones.length) +
-    row('未配線', conn.unrouted) + (conn.shorts.length ? `<p class="err">短絡の疑い: ${conn.shorts.map((s) => s.join('/')).map(esc).join('、')}</p>` : '');
+    row('未配線', conn.unrouted + (conn.fillStale ? '（ベタ塗り直し中）' : '')) + (conn.shorts.length ? `<p class="err">短絡の疑い: ${conn.shorts.map((s) => s.join('/')).map(esc).join('、')}</p>` : '');
   const nls = netlistStatus(state.project);
   const ds = drcStatus(state.project, pcb), dr = state.project.checks?.drc;
   html += `<p class="kv">DRC: ${{ none: '未実行', current: `最新（エラー${dr?.summary.errors ?? 0}・警告${dr?.summary.warnings ?? 0}）`, stale: '<span class="warn">変更後に未実行</span>' }[ds]}</p>`;
@@ -339,11 +355,13 @@ function renderOverlay() {
   const pv = $('#parts-view');
   pv.hidden = state.workspace !== 'parts';
   $('#check-view').hidden = state.workspace !== 'check';
-  const noCanvas = state.workspace === 'parts' || state.workspace === 'check';
+  $('#output-view').hidden = state.workspace !== 'output';
+  const noCanvas = ['parts', 'check', 'output'].includes(state.workspace);
   document.querySelector('.zoom-ctl').hidden = noCanvas;
   $('#coords').hidden = noCanvas;
   if (state.workspace === 'parts') state.partsView.render();
   if (state.workspace === 'check') state.checkView.render();
+  if (state.workspace === 'output') state.outputView.render();
   // 一部でも実装済みならキャンバスを塞がない（未実装分はサイドパネル・モジュール状況に表示）
   if (workspaceStatus(ws) !== 'planned') { ov.hidden = true; return; }
   ov.hidden = false;
@@ -728,6 +746,14 @@ async function boot() {
     mutate: (fn, reason) => { mutateProject(fn, reason); renderNav(); },
     jump: jumpTo,
     ask, toast, fmtTime,
+  });
+  state.outputView = createOutputView({
+    root: $('#output-view'),
+    getProject: () => state.project,
+    getPcb: () => ensurePcb(state.project),
+    version: APP_VERSION,
+    toast, ask, download, fmtTime,
+    runDrc: () => state.checkView.run('drc', { quiet: true }),
   });
   state.partsView = createPartsView({
     root: $('#parts-view'),

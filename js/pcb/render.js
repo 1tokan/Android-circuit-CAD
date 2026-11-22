@@ -1,6 +1,6 @@
 // PCB の SVG 描画（単位 mm）
 import { toMm, boardRect } from './model.js';
-import { silkSegments, pin1Mark, refdesPos } from './shapes.js';
+import { silkSegments, pin1Mark, silkTexts } from './shapes.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mm = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
@@ -46,7 +46,10 @@ export function renderPcb(pcb, { selection = new Set(), conn = null, activeLayer
   const layerGroup = (cu, isActive) => {
     const g = [];
     for (const z of pcb.zones.filter((z) => z.layer === cu)) {
-      g.push(`<polygon class="zone ${cu === 'F.Cu' ? 'fcu' : 'bcu'}${selection.has(`z:${z.id}`) ? ' sel' : ''}" points="${z.polygon.map((q) => `${toMm(q.x)},${toMm(q.y)}`).join(' ')}"/>`);
+      const cls = `${cu === 'F.Cu' ? 'fcu' : 'bcu'}${selection.has(`z:${z.id}`) ? ' sel' : ''}`;
+      const f = conn?.fills?.get(z.id);
+      if (f) g.push(`<path class="zone-fill ${cls}${conn.fillStale ? ' stale' : ''}" fill-rule="evenodd" d="${f.polygons.map((poly) => poly.map((ring) => 'M' + ring.map(([x, y]) => `${x} ${y}`).join('L') + 'Z').join('')).join('')}"/>`);
+      g.push(`<polygon class="zone ${cls}${f ? ' outline-only' : ''}" points="${z.polygon.map((q) => `${toMm(q.x)},${toMm(q.y)}`).join(' ')}"/>`);
     }
     for (const t of pcb.tracks.filter((t) => t.layer === cu)) {
       const a = mm(t.a), b = mm(t.b);
@@ -66,12 +69,11 @@ export function renderPcb(pcb, { selection = new Set(), conn = null, activeLayer
   // シルク
   if (S.silk) {
     out.push('<g class="silk-layer">' + fps.map((f) => footprintLayer(f, 'Silk', selection.has(`f:${f.id}`))).join(''));
-    for (const f of pcb.footprints) {
-      const rp = refdesPos(f);
-      out.push(`<text class="refdes ${f.side === 'bottom' ? 'bottom' : ''}${selection.has(`f:${f.id}`) ? ' sel' : ''}" x="${rp.x}" y="${rp.y}" font-size="${rp.size}" text-anchor="middle">${esc(f.ref)}</text>`);
-    }
-    for (const t of pcb.texts) {
-      out.push(`<text class="silk-text ${t.layer === 'B.SilkS' ? 'bottom' : ''}${selection.has(`x:${t.id}`) ? ' sel' : ''}" x="${toMm(t.x)}" y="${toMm(t.y)}" font-size="${toMm(t.size)}" text-anchor="middle" transform="rotate(${t.rot || 0} ${toMm(t.x)} ${toMm(t.y)})${t.layer === 'B.SilkS' ? ` translate(${2 * toMm(t.x)} 0) scale(-1 1)` : ''}" dominant-baseline="central">${esc(t.text)}</text>`);
+    // 文字は Gerber と同じストロークフォントで描く（見たとおりに製造される）
+    for (const t of silkTexts(pcb)) {
+      const sel = selection.has(t.kind === 'refdes' ? `f:${t.id}` : `x:${t.id}`);
+      const d = t.strokes.map((st) => 'M' + st.map((p) => `${+p.x.toFixed(4)} ${+p.y.toFixed(4)}`).join('L')).join('');
+      out.push(`<path class="silk-stroke ${t.layer === 'B.SilkS' ? 'bottom' : ''}${sel ? ' sel' : ''}" stroke-width="${t.width}" d="${d}"/>`);
     }
     out.push('</g>');
   }

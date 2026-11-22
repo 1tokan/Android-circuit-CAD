@@ -11,6 +11,7 @@ const RULE_LABELS = {
   boardEdgeClearanceMm: '基板外形と銅', minViaDrillMm: 'ビア最小穴径', minViaDiameterMm: 'ビア最小外径', minViaAnnularMm: 'ビア最小ランド幅',
   minAnnularRingMm: 'スルーホールパッド最小ランド幅', minPthDrillMm: 'スルーホール最小穴径', maxDrillMm: '最大穴径',
   minHoleToHoleMm: '穴どうし（異なるネット）', minNpthToCopperMm: '取付穴と銅', minSilkToPadMm: 'シルクとパッド',
+  minSilkWidthMm: 'シルク最小線幅', minSilkTextHeightMm: 'シルク文字の最小高さ', maskExpansionMm: 'レジスト開口の広げ幅',
 };
 
 /**
@@ -24,13 +25,13 @@ export function createCheckView(ctx) {
     return kind === 'erc' ? ercStatus(p) : drcStatus(p, ctx.getPcb());
   }
 
-  function run(kind) {
+  function run(kind, { quiet = false } = {}) {
     const p = ctx.getProject();
     const r = kind === 'erc' ? runErc(p) : runDrc(p, ctx.getPcb());
     ctx.mutate((q) => { q.checks = { ...(q.checks || {}), [kind]: r }; }, `check:${kind}`);
     st.tab = kind;
     render();
-    ctx.toast(`${kind.toUpperCase()}: エラー ${r.summary.errors}・警告 ${r.summary.warnings}`);
+    if (!quiet) ctx.toast(`${kind.toUpperCase()}: エラー ${r.summary.errors}・警告 ${r.summary.warnings}`);
     return r;
   }
 

@@ -116,7 +116,7 @@ await step('DRC: 取込直後は未配置・未配線をエラー表示', async 
   const d = (await checks()).drc;
   assert.equal(d.issues.filter((i) => i.rule === 'outside_board' && i.level === 'error').length, 3);
   assert.equal(d.issues.filter((i) => i.rule === 'unrouted').length, 3);
-  assert.match(await page.locator('#check-view').textContent(), /ベタ（塗りつぶし）/, '未検査項目にベタ');
+  assert.match(await page.locator('#check-view').textContent(), /ベタの細い部分/, '未検査項目を表示');
 });
 
 await step('DRC: 配置・配線後はエラー0、間隔不足を作ると検出して PCB の位置へ飛べる', async () => {

@@ -110,6 +110,8 @@ await step('部品をタッチでドラッグして基板内へ（0.25mmグリ�
   assert.ok(Math.abs(g.x / 1e6 - 25) < 1 && Math.abs(g.y / 1e6 - 12) < 1, `${g.x / 1e6},${g.y / 1e6}`);
   assert.equal(g.x % 250000, 0, 'グリッド吸着');
   await setPos('R1', 25, 12); await setPos('D1', 38, 12); await setPos('J1', 10, 25);
+  // D1 を180°回してパッド2を左に（R1→D1-2 の配線が GND の D1-1 を横切ると本当に短絡するため）
+  await page.evaluate(() => window.pocketEDA.editPcb(() => { window.pocketEDA.state.project.pcb.footprints.find((q) => q.ref === 'D1').rot = 180; }, 'test'));
   await page.evaluate(() => window.pocketEDA.state.pcbEditor.render());
 });
 
@@ -213,10 +215,10 @@ await step('長押しで属性: 位置・回転・ロック', async () => {
   await touch('touchStart', [p]); await page.waitForTimeout(600); await touch('touchEnd', []);
   await page.waitForSelector('#dialog[open]');
   assert.match(await page.locator('#dialog-title').textContent(), /D1/);
-  await page.locator('#dialog-body [name="rot"]').fill('45');
+  await page.locator('#dialog-body [name="rot"]').fill('225'); // 180°の配置から斜めに（パッド2が配線の端に残る向き）
   await page.locator('#dialog-body [name="locked"]').check();
   await page.locator('#dialog-actions button[value="ok"]').click();
-  await page.waitForFunction(() => window.pocketEDA.state.project.pcb.footprints.find((q) => q.ref === 'D1').rot === 45);
+  await page.waitForFunction(() => window.pocketEDA.state.project.pcb.footprints.find((q) => q.ref === 'D1').rot === 225);
   const g = (await pcb()).footprints.find((q) => q.ref === 'D1');
   assert.equal(g.locked, true);
   // ロック中はドラッグしても動かない
@@ -248,7 +250,8 @@ await step('保存→再読込でPCBが復元', async () => {
   assert.equal(b1.vias.length, 1); assert.equal(b1.zones.length, 1); assert.equal(b1.holes.length, 1);
   assert.equal(b1.footprints.length, 3);
   await ws('pcb');
-  assert.equal(await page.evaluate(() => window.pocketEDA.state.pcbEditor.connectivity().unrouted), 0);
+  const c1 = await page.evaluate(() => window.pocketEDA.state.pcbEditor.connectivity());
+  assert.equal(c1.unrouted, 0, JSON.stringify(c1.ratsnest) + JSON.stringify(b1.holes) + JSON.stringify(b1.texts));
 });
 
 await step('タブレット: マウスで範囲選択→Rキーで回転→Ctrl+Zで戻す', async () => {

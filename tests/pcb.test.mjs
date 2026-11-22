@@ -86,7 +86,7 @@ test('ラッツネスト: 配線するとその接続が消え、全部つなぐ
   // 部品を基板内に配置
   Object.assign(inst(pcb, 'J1'), { x: toNm(10), y: toNm(20) });
   Object.assign(inst(pcb, 'R1'), { x: toNm(25), y: toNm(10) });
-  Object.assign(inst(pcb, 'D1'), { x: toNm(40), y: toNm(10) });
+  Object.assign(inst(pcb, 'D1'), { x: toNm(40), y: toNm(10), rot: 180 }); // パッド2を左に（R1→D1-2 の配線が D1-1 を横切らないように）
   let c = computePcbConnectivity(pcb);
   assert.equal(c.unrouted, 3, '3ネット×(2パッド-1)');
   const w = pcb.settings.trackWidth;
@@ -102,7 +102,7 @@ test('ラッツネスト: 配線するとその接続が消え、全部つなぐ
   addTrackPath(pcb, routePath({ x: j1.x, y: 14 }, r1, '45'), 'F.Cu', w, j1.net);
   c = computePcbConnectivity(pcb);
   assert.equal(c.unrouted, 1, 'ビアで層をまたいで接続');
-  // GND はベタ（表）でつなぐ（推定）
+  // GND はベタ（表）でつなぐ（塗りつぶし計算の島でつながる）
   addBoardZone(pcb, 'F.Cu', 'GND');
   c = computePcbConnectivity(pcb);
   assert.equal(c.unrouted, 0);

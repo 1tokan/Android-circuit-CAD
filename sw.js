@@ -1,6 +1,6 @@
 // Service Worker: アプリ本体をキャッシュしてオフライン起動を可能にする。
 // 更新時は CACHE のバージョンを上げる。
-const CACHE = 'pocket-eda-v0.5.0';
+const CACHE = 'pocket-eda-v0.6.0';
 const ASSETS = [
   './',
   './index.html',
@@ -37,6 +37,15 @@ const ASSETS = [
   './js/check/erc.js',
   './js/check/drc.js',
   './js/check/view.js',
+  './js/check/rules.js',
+  './js/pcb/text.js',
+  './js/pcb/zonefill.js',
+  './js/output/plot.js',
+  './js/output/gerber.js',
+  './js/output/zip.js',
+  './js/output/view.js',
+  './js/vendor/polygon-clipping.js',
+  './js/vendor/hershey-simplex.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

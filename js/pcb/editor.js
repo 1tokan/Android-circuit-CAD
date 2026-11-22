@@ -41,6 +41,17 @@ export function createPcbEditor(ctx) {
   }
 
   // ---------------- 描画 ----------------
+  let refillTimer = null;
+  function scheduleRefill() {
+    clearTimeout(refillTimer);
+    refillTimer = setTimeout(() => {
+      refillTimer = null;
+      if (st.drag || !ctx.isActive()) { if (st.drag) scheduleRefill(); return; }
+      st.conn = computePcbConnectivity(pcb(), { rules: ctx.getProject().board?.rules || {} });
+      render();
+      ctx.onSelectionChange?.();
+    }, 350);
+  }
   function render() {
     if (!ctx.isActive()) return;
     let board = pcb();
@@ -63,8 +74,11 @@ export function createPcbEditor(ctx) {
       if (last) preview.routeStart = st.route.pts[0];
       if (!last && st.hover) preview.cursor = snapTarget(pcb(), st.hover, 12 / ctx.vp.scale, st.layer) || snapPt(st.hover);
     }
-    st.conn = computePcbConnectivity(pcb());
-    const conn = board === pcb() ? st.conn : computePcbConnectivity(board);
+    const rules = ctx.getProject().board?.rules || {};
+    // ベタの塗り直しは重いので、編集直後は前回の塗りを薄く表示し、手が止まってから塗り直す
+    st.conn = computePcbConnectivity(pcb(), { rules, allowStaleFill: true });
+    if (st.conn.fillStale) scheduleRefill();
+    const conn = board === pcb() ? st.conn : computePcbConnectivity(board, { rules, allowStaleFill: true });
     ctx.content.innerHTML = renderPcb(board, { selection: st.sel, conn, activeLayer: st.layer, preview });
     renderCtxBar();
   }
@@ -409,7 +423,10 @@ export function createPcbEditor(ctx) {
     },
     render, setTool, action, editProps, importFromSchematic,
     resetForProject() { st.sel = new Set(); st.route = { pts: [], net: null }; st.drag = null; st.tool = 'select'; st.layer = 'F.Cu'; },
-    connectivity: () => computePcbConnectivity(pcb()),
+    /** 最新の接続（ベタも塗り直す） */
+    connectivity: () => computePcbConnectivity(pcb(), { rules: ctx.getProject().board?.rules || {} }),
+    /** 画面に出ている接続（ベタは塗り直し待ちのことがある。サイドパネル用） */
+    lastConnectivity: () => st.conn || computePcbConnectivity(pcb(), { rules: ctx.getProject().board?.rules || {}, allowStaleFill: true }),
     selectionInfo: () => [...st.sel].map((k) => ({ key: k, item: findItem(pcb(), k) })),
   };
 }
