@@ -36,7 +36,7 @@ export function createProject(name = '新規プロジェクト', now = Date.now(
     revision: 0,
     schematic: { sheets: [{ id: newId('sheet'), name: 'Sheet1', components: [], wires: [], junctions: [], labels: [] }] },
     library: { parts: [] },          // プロジェクト内で使う部品（LCSC品番を含む）
-    netlist: null,                   // 第3段階で生成。生成前は null
+    netlist: null,                   // 回路図から生成。生成前は null
     pcb: { outline: [], footprints: [], tracks: [], vias: [], zones: [], texts: [], holes: [] },
     board: defaultBoardSettings(),
     checks: { erc: null, drc: null }, // 未実行は null（「検査済み」と誤表示しないため）

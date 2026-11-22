@@ -452,3 +452,30 @@ button { font: inherit; color: inherit; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; border: 1px solid var(--line); }
 .order-sheet { white-space: pre-wrap; font-size: 11.5px; background: var(--bg3); padding: 8px; border-radius: 8px; overflow-wrap: anywhere; }
 .rule-row.changed span { color: var(--accent); font-weight: 600; }
+
+/* ---- 全画面の重ね表示（Claude・3D） ---- */
+.overlay-panel { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow: auto; padding: 0 0 24px; }
+.ai-wrap { max-width: 860px; margin: 0 auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 10px; }
+.ai-head { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--bg); padding: 6px 0; z-index: 1; }
+.ai-head b { font-size: 16px; }
+.ai-settings { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.ai-settings .field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-size: 13px; }
+.ai-settings input[type=password], .ai-settings select, .ai-input textarea, #ai-paste, .ai-copy { width: 100%; background: var(--bg3); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: inherit; min-height: 40px; box-sizing: border-box; }
+.ai-log { display: flex; flex-direction: column; gap: 8px; max-height: 45vh; overflow: auto; }
+.ai-msg { padding: 8px 10px; border-radius: 10px; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-msg.user { background: var(--accent); color: var(--accent-fg); align-self: flex-end; max-width: 88%; }
+.ai-msg.assistant { background: var(--bg2); border: 1px solid var(--line); }
+.ai-q { margin-top: 6px; }
+.ai-q ul, .ai-result ul { margin: 4px 0; padding-left: 18px; }
+.ai-result h4 { margin: 10px 0 4px; font-size: 13px; }
+.ai-input { position: sticky; bottom: 0; background: var(--bg); padding-top: 6px; }
+
+/* 3D 表示 */
+.viewer3d { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.viewer3d[hidden] { display: none; }
+.v3d-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line, #333); }
+.v3d-bar b { font-size: 14px; }
+.v3d-canvas { flex: 1; min-height: 240px; position: relative; touch-action: none; }
+.v3d-canvas canvas { display: block; touch-action: none; }
+.v3d-tools { padding: 8px 12px 0; }
+.v3d-note { margin: 6px 12px; padding-bottom: env(safe-area-inset-bottom); font-size: 12px; }

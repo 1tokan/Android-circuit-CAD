@@ -24,7 +24,7 @@ export const WORKSPACES = [
   { id: 'output',    label: '出力',  icon: 'out', modules: ['gerber', 'bomcpl'] },
 ];
 
-// 各作業領域の下部ツール（第2段階以降で有効化）
+// 各作業領域の下部ツール
 export const TOOLS = {
   schematic: [
     { id: 'select', label: '選択', icon: 'M5 3l12 8-5 1 3 6-2 1-3-6-4 4z' },

@@ -1,6 +1,6 @@
 // 回路図シンボル定義と部品種別カタログ
 // シンボルはローカル座標（1単位=0.05inch）で、ピン先端は必ず整数座標。
-// ピン番号は一般的なフットプリントのパッド番号に合わせる（第3段階でピン↔パッド対応表を持つ）。
+// ピン番号は一般的なフットプリントのパッド番号に合わせる（部品データのピン↔パッド対応表で変えられる）。
 //   ダイオード/LED: 1=K(カソード), 2=A(アノード)  … KiCad標準と同じ
 //   BJT(SOT-23): 1=B, 2=E, 3=C   MOSFET(SOT-23): 1=G, 2=S, 3=D
 //   オペアンプ: LM358 のAユニット相当 1=OUT, 2=IN-, 3=IN+, 4=V-, 8=V+
@@ -187,7 +187,7 @@ function connector(comp) {
 }
 
 // ---- 部品種別カタログ ----
-// prefix: 部品番号の接頭辞 / props: 既定の属性 / footprint は第3段階でライブラリと結びつける仮名
+// prefix: 部品番号の接頭辞 / props: 既定の属性 / footprint は既定のフットプリント
 export const KINDS = [
   { kind: 'resistor', label: '抵抗', prefix: 'R', props: { value: '10k', footprint: 'R_0805' } },
   { kind: 'pot', label: '可変抵抗', prefix: 'RV', props: { value: '10k', footprint: 'Potentiometer_3362P' } },

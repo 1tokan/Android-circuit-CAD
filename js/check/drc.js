@@ -297,7 +297,7 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   const gen = pcb.footprints.filter((f) => f.fpDef.generated).map((f) => f.ref);
   const unver = pcb.footprints.filter((f) => !f.fpDef.generated && !f.fpDef.verified).map((f) => f.ref);
   if (gen.length) add('warning', 'footprint_unverified', `パッケージ名から自動生成したフットプリント（データシートの推奨ランドと要照合）: ${gen.join(', ')}`, gen, null);
-  if (unver.length) add('warning', 'footprint_unverified', `寸法が未照合のフットプリント（第6段階で KiCad 公式データと照合）: ${unver.join(', ')}`, unver, null);
+  if (unver.length) add('warning', 'footprint_unverified', `寸法が KiCad 公式データと未照合のフットプリント（データシートで確認）: ${unver.join(', ')}`, unver, null);
 
   // ---- ベタ ----
   // 塗りつぶし結果の外周・穴の辺を、別ネットの銅と比べ直す（塗りつぶし計算の独立した検算）

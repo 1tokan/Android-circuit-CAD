@@ -18,3 +18,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | 使用箇所 | 元 | ライセンス |
 |---|---|---|
 | js/output/assembly.js の JLC_ROTATION_DB（パッケージごとの CPL 回転補正の値） | [JLCPCB Fabrication Toolkit](https://github.com/bennymeg/Fabrication-Toolkit)（Benny Megidish）の transformations.csv | Apache License 2.0 |
+
+## フットプリントの寸法データ
+
+| ファイル | 元 | ライセンス |
+|---|---|---|
+| js/library/fp-kicad.js（パッド・外形枠・本体の寸法） | [KiCad 公式フットプリントライブラリ](https://github.com/KiCad/kicad-footprints)（GitHub ミラー）から tests/tools/kicad-import.mjs で抜き出したもの | CC-BY-SA 4.0（KiCad ライブラリの例外条項つき: このデータを使った設計・製造データには適用されない） |
+
+## 3D 表示
+
+| ファイル | 元 | ライセンス |
+|---|---|---|
+| three.js | [three.js](https://github.com/mrdoob/three.js) r187 の必要な部分と OrbitControls を esbuild で1ファイルにまとめたもの。改変なし | MIT（Copyright © 2010-2026 three.js authors） |

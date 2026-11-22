@@ -21,11 +21,13 @@ import { createCheckView } from './check/view.js';
 import { ercStatus } from './check/erc.js';
 import { drcStatus } from './check/drc.js';
 import { createOutputView } from './output/view.js';
+import { createAiView } from './ai/view.js';
+import { applySpec, projectFromSpec } from './ai/spec.js';
 import { moduleById } from './modules/registry.js';
 import { esc } from './core/util.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.9.0';
 
 const state = {
   project: null,
@@ -42,6 +44,7 @@ const state = {
   partsView: null,
   checkView: null,
   outputView: null,
+  aiView: null,
   marker: null, // 検査結果の「表示」で示す位置 {ws, x, y}
   assign: null, // 部品データの割り当て先 {key, ref}
 };
@@ -283,6 +286,8 @@ function toBase64(bytes) {
 function handleBack() {
   const dlg = $('#dialog');
   if (dlg.open) { dlg.close(''); return true; }
+  if (!$('#viewer3d').hidden) { closeOverlay('#viewer3d'); return true; }
+  if (!$('#ai-view').hidden) { closeOverlay('#ai-view'); return true; }
   if (!$('#menu').hidden) { $('#menu').hidden = true; return true; }
   if (!$('#drawer').hidden) { closeDrawer(); return true; }
   if (!$('#picker').hidden) { $('#picker').hidden = true; return true; }
@@ -361,7 +366,7 @@ async function showNetlist() {
   const list = (arr, cls) => (arr.length ? `<ul class="${cls}">${arr.slice(0, 40).map((x) => `<li>${esc(x.message)}</li>`).join('')}${arr.length > 40 ? `<li>…ほか${arr.length - 40}件</li>` : ''}</ul>` : '');
   const nets = nl.nets.map((n) => `<li><b>${esc(n.name)}</b><br><small>${n.nodes.map((x) => `${esc(x.ref)}-${esc(x.pad)}`).join(', ')}</small></li>`).join('');
   const html = `<p>部品 <b>${nl.summary.components}</b>・ネット <b>${nl.summary.nets}</b>・エラー <b class="${errs.length ? 'err' : ''}">${errs.length}</b>・警告 ${warns.length}</p>` +
-    (errs.length ? '<p class="err">エラーを直すまで、PCB設計（第4段階）には正しく読み込めません。</p>' : '<p class="ok">✓ エラーなし（ノードは「部品番号-パッド番号」）</p>') +
+    (errs.length ? '<p class="err">エラーを直すまで、PCB には正しく読み込めません。</p>' : '<p class="ok">✓ エラーなし（ノードは「部品番号-パッド番号」）</p>') +
     list(errs, 'errs') + list(warns, 'warns') + `<h4>ネット</h4><ul class="netlist">${nets || '<li>ネットはありません</li>'}</ul>`;
   const r = await ask('ネットリスト', html, [{ label: '閉じる', value: '' }, { label: 'テキスト書出', value: 'txt' }, { label: 'JSON書出', value: 'json', cls: 'primary' }]);
   const base = safeFileName(state.project.name);
@@ -448,11 +453,56 @@ function renderCanvas() {
   renderMarker();
 }
 
+/** Claude で回路を作る */
+async function openAi() {
+  $('#ai-view').hidden = false;
+  await state.aiView.open();
+}
+function closeOverlay(id) { $(id).hidden = true; $(id).innerHTML = ''; }
+
+/** 回路図の部品が全部入るように表示を合わせる */
+function fitSchematic() {
+  const sh = state.project.schematic.sheets[0];
+  const svg = $('#canvas');
+  const { width, height } = svg.getBoundingClientRect();
+  if (!sh.components.length || !width) { centerOrigin(); return; }
+  const xs = sh.components.map((c) => c.x), ys = sh.components.map((c) => c.y);
+  const x0 = Math.min(...xs) - 15, y0 = Math.min(...ys) - 15, x1 = Math.max(...xs) + 15, y1 = Math.max(...ys) + 15;
+  state.vp.fit({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, width, Math.max(100, height - 80), 16);
+  state.vp.y -= 60 / state.vp.scale;
+}
+
+/** AI の回路仕様を作図する（replace: 今のプロジェクト、new: 新しいプロジェクト） */
+async function applyAiSpec(c, mode) {
+  try {
+    let report;
+    if (mode === 'new') {
+      const r = projectFromSpec(c, { library: state.lib.all() });
+      r.project.ai = { ...(r.project.ai || {}), history: structuredClone(state.project.ai?.history || []) };
+      await store.saveProject(r.project);
+      await openProject(r.project);
+      report = r.report;
+    } else {
+      editSchematic(() => { report = applySpec(state.project, c, { library: state.lib.all() }); }, 'Claude の回路を作図');
+      mutateProject(() => {}, 'ai');
+    }
+    closeOverlay('#ai-view');
+    switchWorkspace('schematic');
+    fitSchematic();
+    renderCanvas();
+    const erc = state.checkView.run('erc', { quiet: true });
+    toast(`${report.placed} 個の部品を作図しました（新しい部品データ ${report.newParts.length}）。ERC: エラー ${erc.summary.errors}・警告 ${erc.summary.warnings}`);
+  } catch (e) {
+    toast('作図できません: ' + (e.message || e), true);
+  }
+}
+
 /** 3D 表示（three.js は重いので開くときに読み込む） */
 async function open3d() {
   try {
     const { openViewer3d } = await import('./view3d/viewer.js');
-    await openViewer3d({ root: $('#viewer3d'), project: state.project, pcb: ensurePcb(state.project), onClose: () => {} });
+    $('#viewer3d').hidden = false;
+    await openViewer3d({ root: $('#viewer3d'), project: state.project, pcb: ensurePcb(state.project), onClose: () => closeOverlay('#viewer3d') });
   } catch (e) {
     console.error(e);
     toast('3D 表示を開けませんでした: ' + (e?.message || e), true);
@@ -684,6 +734,7 @@ function bindUI() {
       toast('複製しました');
     }
     if (act === 'backups') showBackups();
+    if (act === 'ai') openAi();
     if (act === 'annotate') { state.editor.reannotate(); toast('部品番号を位置順に振り直しました'); }
     if (act === 'netlist') showNetlist();
     if (act === 'about') {
@@ -759,6 +810,7 @@ async function boot() {
     onPartUsed: usePartInProject,
     getProjectPart: (id) => state.project.library.parts.find((p) => p.id === id) || state.lib.get(id),
     openLibrary: (target = null) => { state.assign = target; switchWorkspace('parts'); },
+    openAi: () => openAi(),
   });
   state.pcbHistory = new History(() => state.project.pcb, (s) => { state.project.pcb = s; });
   state.pcbEditor = createPcbEditor({
@@ -804,6 +856,16 @@ async function boot() {
     editPcb: (fn, label) => editPcb(fn, label),
     mutate: (fn, reason) => mutateProject(fn, reason),
     open3d: () => open3d(),
+  });
+  state.aiView = createAiView({
+    root: $('#ai-view'),
+    getProject: () => state.project,
+    mutate: (fn, reason) => mutateProject(fn, reason),
+    applySpec: applyAiSpec,
+    ask, toast,
+    getSetting: (k, d) => store.getSetting(k, d),
+    setSetting: (k, v) => store.setSetting(k, v),
+    close: () => closeOverlay('#ai-view'),
   });
   state.partsView = createPartsView({
     root: $('#parts-view'),
@@ -863,6 +925,6 @@ async function boot() {
 }
 
 // 開発・テスト用の操作口（コンソールから使える）
-window.pocketEDA = { state, jumpTo, back: handleBack, openProject, native: NATIVE, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
+window.pocketEDA = { state, jumpTo, back: handleBack, openProject, openAi, open3d, applyAiSpec, native: NATIVE, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
 
 boot();

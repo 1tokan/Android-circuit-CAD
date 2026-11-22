@@ -1,6 +1,6 @@
 // ネットリスト生成エンジン
 // 回路図の電気的接続（connectivity.js）と、部品ごとのピン↔パッド対応から、
-// 「どの部品のどのパッドがどのネットにつながるか」を作る。PCBエディタ（第4段階）はこれを読み込む。
+// 「どの部品のどのパッドがどのネットにつながるか」を作る。PCBエディタはこれを読み込む。
 // 電源記号・GND記号は部品ではないので出力しない（ネット名にだけ反映）。
 
 import { computeConnectivity, cmpRef } from '../schematic/connectivity.js';
@@ -70,7 +70,7 @@ export function generateNetlist(project, { now = new Date().toISOString() } = {}
       const chk = checkPinMap(sym, fp, pm);
       chk.errors.forEach((m) => err(`${c.ref}: ${m}`, c.ref));
       if (fp.generated) warn(`${c.ref}: フットプリント「${fp.name}」はパッケージ名から自動生成した推定です。データシートの推奨ランドと照合してください`, c.ref);
-      else if (!fp.verified) warn(`${c.ref}: フットプリント ${fp.id} は寸法が未照合です（第6段階で照合）`, c.ref);
+      else if (!fp.verified) warn(`${c.ref}: フットプリント ${fp.id} の寸法は KiCad 公式データと未照合です（データシートの推奨ランドで確認）`, c.ref);
     }
     if (!c.props?.dnp && !(part?.lcsc || c.props?.lcsc)) warn(`${c.ref}: LCSC品番が未設定です（JLCPCBで実装するには必要）`, c.ref);
     if (part && !part.lcscVerified && part.lcsc) warn(`${c.ref}: LCSC品番 ${part.lcsc} は未確認です`, c.ref);

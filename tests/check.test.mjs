@@ -207,12 +207,12 @@ function routeA(pcb) {
   return { j1, j2, r1, r2, d1, d2 };
 }
 
-test('DRC: 配置・配線済みの回路Aは誤りなし（未照合フットプリントの注意だけ）', () => {
+test('DRC: 配置・配線済みの回路Aは誤りも注意もなし（フットプリントは KiCad と照合済み）', () => {
   const { prj, pcb } = boardA();
   routeA(pcb);
   const r = runDrc(prj, pcb);
   assert.equal(r.summary.errors, 0, JSON.stringify(r.issues.map((i) => i.message), null, 1));
-  assert.deepEqual([...new Set(rulesOf(r, 'warning'))], ['footprint_unverified'], JSON.stringify(r.issues.map((i) => i.message)));
+  assert.deepEqual([...new Set(rulesOf(r, 'warning'))], [], JSON.stringify(r.issues.map((i) => i.message)));
   assert.equal(r.checked.length, DRC_RULES.length);
   assert.ok(r.unchecked.some((u) => u.includes('ベタ')), 'ベタの未検査を明示');
   prj.checks.drc = r;

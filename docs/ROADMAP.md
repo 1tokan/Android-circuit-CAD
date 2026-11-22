@@ -79,8 +79,13 @@ index.html ── js/app.js（起動・UIシェル）
 | **6** ✅ | Gerber・Excellon | RS-274X（X2属性）・Excellon・ZIP、ベタの塗りつぶし。tracespace（pcb-stackup）と pcb-tools（Python）で独立検証（KiCad GerbView は環境に無く未実施） |
 | **7** ✅ | BOM・CPL | JLCPCB形式（列は JLCPCB ヘルプの指定どおり）。座標を Gerber と照合、回転は Fabrication Toolkit の補正表と規則に合わせ、部品ごとに手動補正可 |
 | **8** 🔶 | Android実機テスト | エミュレータ（Android 11/14/15）で APK の自動試験とテストA〜Eの通しを実施済み。実機での操作性の確認は docs/DEVICE_TEST.md の手順で利用者が実施 |
+| **9** ✅ | Claude で回路設計・多層・3D | 回路仕様の JSON 形式（構造化出力のスキーマ）→ 検証 → 自動作図、ERC 0 を単体＋E2E（API はモック）で確認。4・6層の Gerber（.G1〜）を pcb-stackup・pcb-tools で解析。製造仕様（JLCPCB の注文項目）、レジストのブリッジ検査。3D 表示を E2E で描画確認。フットプリント 44 種を KiCad 公式と照合 |
 
 ## 5. 既知のリスク
+
+- AI の回路は定数・ピン番号の誤りがありうる → ERC と利用者のデータシート確認が前提。API は利用者のキーで従量課金
+- 照合に使った KiCad フットプリントは GitHub のミラー（2020年版）。その後の KiCad 側の修正は未反映
+- 3D 表示の部品は簡易形状（STEP モデルなし）
 
 - GNDポリゴン（ベタ）のクリアランス付き塗りつぶしは計算が重い → Web Worker で処理
 - フットプリント回転基準のJLCとのずれ → 部品ごとの補正値と、CPLプレビューで確認

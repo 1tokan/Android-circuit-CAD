@@ -7,56 +7,26 @@
 
 export async function loadModules(base) {
   const im = (p) => import(new URL(p, base).href);
-  const [project, model, conn, parts, fps, netlist, pcb, zonefill, erc, drc, plot, gerber, zip, asm] = await Promise.all([
+  const [project, model, conn, parts, fps, netlist, pcb, zonefill, erc, drc, plot, gerber, zip, asm, ai] = await Promise.all([
     im('js/core/project.js'), im('js/schematic/model.js'), im('js/schematic/connectivity.js'), im('js/library/parts.js'),
     im('js/library/footprints.js'), im('js/netlist/netlist.js'), im('js/pcb/model.js'), im('js/pcb/zonefill.js'),
-    im('js/check/erc.js'), im('js/check/drc.js'), im('js/output/plot.js'), im('js/output/gerber.js'), im('js/output/zip.js'), im('js/output/assembly.js'),
+    im('js/check/erc.js'), im('js/check/drc.js'), im('js/output/plot.js'), im('js/output/gerber.js'), im('js/output/zip.js'), im('js/output/assembly.js'), im('js/ai/spec.js'),
   ]);
-  return { project, model, conn, parts, fps, netlist, pcb, zonefill, erc, drc, plot, gerber, zip, asm };
+  return { project, model, conn, parts, fps, netlist, pcb, zonefill, erc, drc, plot, gerber, zip, asm, ai };
 }
 
-const POWER = new Set(['GND', '+5V', '+3V3', 'VBUS', 'VCC']);
-
 /**
- * @param spec { name, parts: [[ref, partOrPredicate, props?]], nets: { NET: ['R1.1', 'U1.3', ...] } }
+ * テスト用の定義を回路仕様（js/ai/spec.js の形式）にして、アプリと同じ方法で回路図にする
+ * @param spec { name, parts: [[ref, partOrPredicate]], nets: { NET: ['R1.1', 'U1.3', ...] } }
  */
 export function buildProject(M, spec) {
   const prj = M.project.createProject(spec.name);
-  const sh = prj.schematic.sheets[0];
-  const byRef = new Map();
-  let i = 0;
-  for (const [ref, pp, extra = {}] of spec.parts) {
+  const parts = spec.parts.map(([ref, pp]) => {
     const part = typeof pp === 'function' ? M.parts.BUILTIN_PARTS.find(pp) : M.parts.normalizePart(pp);
     if (!part) throw new Error(`${spec.name}: 部品が見つかりません (${ref})`);
-    if (!prj.library.parts.some((p) => p.id === part.id)) prj.library.parts.push(part);
-    // 部品は 40 グリッド間隔で並べる（ピンどうしが重ならない）
-    const x = (i % 6) * 40, y = Math.floor(i / 6) * 40;
-    i++;
-    const c = M.model.addComponent(sh, part.kind, x, y, {
-      partId: part.id, value: part.value, footprint: M.parts.partFootprint(part)?.id || part.footprint,
-      ...(part.symbol?.pinCount ? { pinCount: part.symbol.pinCount, pinNames: part.symbol.pinNames || '' } : {}),
-      ...extra,
-    });
-    c.ref = ref;
-    byRef.set(ref, c);
-  }
-  const pins = M.conn.pinPositions(sh);
-  const pinOf = (s) => {
-    const [ref, num] = s.split('.');
-    const c = byRef.get(ref);
-    const p = c && pins.find((q) => q.compId === c.id && q.pin === num);
-    if (!p) throw new Error(`${spec.name}: ピン ${s} がありません`);
-    return p;
-  };
-  for (const [net, list] of Object.entries(spec.nets)) {
-    list.forEach((s, k) => {
-      const p = pinOf(s);
-      if (k === 0 && POWER.has(net)) {
-        const sym = M.model.addComponent(sh, net === 'GND' ? 'gnd' : 'power', p.x, p.y, { net });
-        sym.props.net = net;
-      } else M.model.addLabel(sh, p.x, p.y, net);
-    });
-  }
+    return { ref, kind: part.kind, value: part.value, package: part.package, lcsc: '', mpn: '', description: '', pins: [], _part: part };
+  });
+  M.ai.applySpec(prj, { title: spec.name, summary: '', requirements: [], parts, nets: Object.entries(spec.nets).map(([name, pins]) => ({ name, pins })), nc: [], notes: [] });
   return prj;
 }
 

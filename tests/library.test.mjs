@@ -1,4 +1,5 @@
 // node --test tests/library.test.mjs
+import { KICAD_FP } from '../js/library/fp-kicad.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { listFootprints, getFootprint, padNumbers, normalizeFootprint } from '../js/library/footprints.js';
@@ -22,8 +23,12 @@ test('全フットプリント: パッド寸法が正、THTの穴径がパッド
       if (p.type === 'tht') assert.ok(p.drill > 0 && p.drill < Math.min(p.w, p.h), `${fp.id} drill`);
     }
     assert.ok(fp.courtyard.x0 < fp.courtyard.x1 && fp.courtyard.y0 < fp.courtyard.y1);
-    assert.equal(fp.verified, false, '第6段階で照合するまで未照合');
+    // KiCad 公式データがあるものだけ照合済み
+    assert.equal(fp.verified, !!KICAD_FP[fp.id], fp.id);
+    if (KICAD_FP[fp.id]) assert.match(fp.source, /KiCad/);
   }
+  assert.ok(listFootprints().filter((f) => f.verified).length >= 40);
+  assert.equal(getFootprint('SOT-23').pads[0].w, 0.9, 'SOT-23 は KiCad の値（0.9×0.8）');
 });
 
 test('SOIC-8: 1番ピンが左上、反時計回りの番号、ピッチ1.27mm', () => {

@@ -67,7 +67,7 @@ await step('詳細: ピン↔パッド対応表、フットプリント図、LCS
   assert.match(await body.textContent(), /ピン↔パッド対応にエラーなし/);
   assert.equal(await body.locator('.fp-preview .pad').count(), 2);
   assert.equal(await body.locator('a[href="https://www.lcsc.com/product-detail/C1525.html"]').count(), 1);
-  assert.match(await body.textContent(), /寸法未照合/);
+  assert.match(await body.textContent(), /KiCad 公式と照合済み/);
   await page.screenshot({ path: `${OUT}/parts-detail-phone.png` });
 });
 

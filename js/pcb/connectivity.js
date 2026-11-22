@@ -88,7 +88,7 @@ export function computePcbConnectivity(pcb, { rules = {}, allowStaleFill = false
     }
   }
 
-  // 異なるネットのパッドが銅でつながっている＝短絡（第5段階DRCで詳しく検査）
+  // 異なるネットのパッドが銅でつながっている＝短絡（DRC で位置も含めて検査）
   const netsOfGroup = new Map();
   for (const p of pads) {
     if (!p.net) continue;

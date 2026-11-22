@@ -3,16 +3,22 @@
 // パッド: { num, x, y, w, h, shape: 'rect'|'roundrect'|'circle'|'oval', type: 'smd'|'tht', drill? }
 // 同じ番号のパッドが複数あってもよい（SOT-223 のタブ、タクトスイッチの4端子など）。
 //
-// 寸法は IPC-7351 / KiCad 公式フットプリントの公称値に合わせているが、
-// verified:false のものは第6段階（Gerber生成）で KiCad 公式データと照合するまで「未照合」と表示する。
+// パッド・外形枠・本体の寸法は、KiCad 公式ライブラリのデータ（fp-kicad.js）があればそれを使い verified:true とする。
+// データが無いもの（半固定抵抗など）は自前の値のままで verified:false（画面・DRC で「未照合」と表示）。
 
 import { generateFootprint } from './pkggen.js';
+import { KICAD_FP } from './fp-kicad.js';
 
 const smd = (num, x, y, w, h, shape = 'roundrect') => ({ num: String(num), x, y, w, h, shape, type: 'smd' });
 const tht = (num, x, y, size, drill, shape = 'circle') => ({ num: String(num), x, y, w: size, h: size, shape, type: 'tht', drill });
 const r4 = (v) => Math.round(v * 10000) / 10000;
 
 function finish(fp) {
+  const k = KICAD_FP[fp.id];
+  if (k) {
+    // KiCad 公式データで置き換える（パッド・外形枠・本体）
+    fp = { ...fp, pads: k.pads.map((p) => ({ ...p })), courtyard: k.courtyard || fp.courtyard, body: k.body || fp.body, verified: true, source: `KiCad 公式ライブラリ ${k.kicad}` };
+  }
   // 外形（コートヤード）が無ければパッドから求めて 0.25mm 広げる
   if (!fp.courtyard) {
     const xs = [], ys = [];
@@ -21,7 +27,6 @@ function finish(fp) {
     fp.courtyard = { x0: r4(Math.min(...xs) - 0.25), y0: r4(Math.min(...ys) - 0.25), x1: r4(Math.max(...xs) + 0.25), y1: r4(Math.max(...ys) + 0.25) };
   }
   fp.pads = fp.pads.map((p) => ({ ...p, x: r4(p.x), y: r4(p.y) }));
-  fp.jlcRotation = fp.jlcRotation ?? 0; // JLCPCB の部品向き基準との差（第7段階で使う）
   fp.verified = fp.verified ?? false;
   return Object.freeze(fp);
 }
@@ -109,7 +114,7 @@ const LIST = [
 
 const MAP = new Map(LIST.map((f) => [f.id, f]));
 
-// 第2段階の仮フットプリント名 → 実体のID
+// 旧い仮のフットプリント名 → 実体のID
 const ALIASES = {
   SOIC8: 'SOIC-8', 'SOIC-8': 'SOIC-8', SOT23: 'SOT-23', 'SOT-223': 'SOT-223-3_TabPin2',
   SW_SPST_6x6: 'SW_PUSH_6mm', Potentiometer_3362P: 'Trimmer_3P_Inline_P2.54', BatteryHolder: 'JST_PH_B2B-PH-K_1x02_P2.00mm',

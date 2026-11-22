@@ -1,12 +1,12 @@
 {
   "name": "pocket-eda",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "Android向け電子回路・PCB設計CAD（PWA）",
   "scripts": {
-    "test": "node --test tests/unit.test.mjs tests/schematic.test.mjs tests/library.test.mjs tests/jlcsearch.test.mjs tests/pkggen.test.mjs tests/pcb.test.mjs tests/check.test.mjs tests/output.test.mjs tests/assembly.test.mjs tests/scenarios.test.mjs tests/multilayer.test.mjs",
+    "test": "node --test tests/unit.test.mjs tests/schematic.test.mjs tests/library.test.mjs tests/jlcsearch.test.mjs tests/pkggen.test.mjs tests/pcb.test.mjs tests/check.test.mjs tests/output.test.mjs tests/assembly.test.mjs tests/scenarios.test.mjs tests/multilayer.test.mjs tests/ai.test.mjs",
     "serve": "python3 -m http.server 8765",
-    "e2e": "node tests/e2e.mjs && node tests/e2e-schematic.mjs && node tests/e2e-library.mjs && node tests/e2e-pcb.mjs && node tests/e2e-check.mjs && node tests/e2e-output.mjs"
+    "e2e": "node tests/e2e.mjs && node tests/e2e-schematic.mjs && node tests/e2e-library.mjs && node tests/e2e-pcb.mjs && node tests/e2e-check.mjs && node tests/e2e-output.mjs && node tests/e2e-ai3d.mjs"
   }
 }

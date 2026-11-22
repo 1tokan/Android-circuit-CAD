@@ -1,6 +1,6 @@
 // PCB の SVG 描画（単位 mm）
 import { toMm, boardRect, copperLayers } from './model.js';
-import { ROUNDRECT_RATIO } from './shapes.js';
+import { cornerRadius } from './shapes.js';
 import { silkSegments, pin1Mark, silkTexts } from './shapes.js';
 import { esc } from '../core/util.js';
 
@@ -10,7 +10,7 @@ const mm = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
 export const layerClass = (layer) => (layer === 'F.Cu' ? 'fcu' : layer === 'B.Cu' ? 'bcu' : `in${String(layer).slice(2, 3)}`);
 
 function padSvg(p, cls) {
-  const rx = p.shape === 'circle' || p.shape === 'oval' ? Math.min(p.w, p.h) / 2 : p.shape === 'roundrect' ? Math.min(p.w, p.h) * ROUNDRECT_RATIO : 0;
+  const rx = p.shape === 'circle' || p.shape === 'oval' ? Math.min(p.w, p.h) / 2 : p.shape === 'roundrect' ? cornerRadius(p) : 0;
   return `<rect class="${cls}" x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="${rx}"/>`;
 }
 

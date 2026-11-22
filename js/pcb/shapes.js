@@ -4,6 +4,8 @@ import { textStrokes, strokeWidthFor } from './text.js';
 
 /** 角丸パッドの角の半径 = 短辺 × この値（画面・Gerber・3D で共通） */
 export const ROUNDRECT_RATIO = 0.25;
+/** パッドの角の半径（KiCad データはパッドごとの比率 rr を持つことがある） */
+export const cornerRadius = (pad) => Math.min(pad.w, pad.h) * (pad.rr ?? ROUNDRECT_RATIO);
 
 /** パッドの形状（角形・角丸は四角形として保守的に扱う） */
 export function padShape(inst, pad) {
@@ -36,20 +38,21 @@ export function silkSegments(fpDef, clearance = 0.15) {
   const b = fpDef.body;
   if (!b) return [];
   const hw = b.w / 2, hh = b.h / 2;
+  const ox = b.cx || 0, oy = b.cy || 0; // 本体の中心（KiCad データでは原点からずれることがある）
   const rects = fpDef.pads.map((p) => ({ x0: p.x - p.w / 2 - clearance, x1: p.x + p.w / 2 + clearance, y0: p.y - p.h / 2 - clearance, y1: p.y + p.h / 2 + clearance }));
   const out = [];
   // 水平辺: y 固定で x 区間からパッドを除く
   const cutH = (y) => {
-    let iv = [[-hw, hw]];
+    let iv = [[ox - hw, ox + hw]];
     for (const r of rects) if (y >= r.y0 && y <= r.y1) iv = subtract(iv, r.x0, r.x1);
     for (const [a, c] of iv) if (c - a > 0.05) out.push({ a: { x: a, y }, b: { x: c, y } });
   };
   const cutV = (x) => {
-    let iv = [[-hh, hh]];
+    let iv = [[oy - hh, oy + hh]];
     for (const r of rects) if (x >= r.x0 && x <= r.x1) iv = subtract(iv, r.y0, r.y1);
     for (const [a, c] of iv) if (c - a > 0.05) out.push({ a: { x, y: a }, b: { x, y: c } });
   };
-  cutH(-hh); cutH(hh); cutV(-hw); cutV(hw);
+  cutH(oy - hh); cutH(oy + hh); cutV(ox - hw); cutV(ox + hw);
   return out;
 }
 

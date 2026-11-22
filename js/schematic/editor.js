@@ -28,7 +28,7 @@ export function createSchematicEditor(ctx) {
     sel: new Set(),
     multi: false,
     placeKind: 'resistor',
-    placePart: null,   // ライブラリの部品を配置するとき（第3段階）
+    placePart: null,   // ライブラリの部品を配置するとき
     placeRot: 0,
     powerNet: 'VCC',
     lastLabel: 'NET1',
@@ -93,6 +93,7 @@ export function createSchematicEditor(ctx) {
         if (n === 1 && (d.comps.length || d.labels)) chips.push(chip('props', '属性'));
         chips.push(chip('rotate', '回転'), chip('mirror', 'ミラー'), chip('delete', '削除'), chip('clear', '解除'));
       } else {
+        chips.push(chip('ai', 'Claude で作る', !sheet().components.length));
         chips.push('<span class="chip-info hint">タップで選択・長押し＋ドラッグで範囲選択</span>');
       }
     } else if (st.tool === 'place') {
@@ -119,6 +120,7 @@ export function createSchematicEditor(ctx) {
       case 'clear': setSel(new Set()); break;
       case 'pick': openPicker(); break;
       case 'library': ctx.openLibrary(); return;
+      case 'ai': ctx.openAi?.(); return;
       case 'ghostRot': st.placeRot = (st.placeRot + 90) % 360; break;
       case 'bend': st.wire.hFirst = !st.wire.hFirst; break;
       case 'finish': st.wire.pts = []; break;

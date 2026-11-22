@@ -253,10 +253,15 @@ export function guessFootprint(kind, pkg) {
     [/^TSSOP-?8$/, 'TSSOP-8'], [/^TSSOP-?14$/, 'TSSOP-14'], [/^TSSOP-?20$/, 'TSSOP-20'],
     [/^DIP-?8$/, 'DIP-8'], [/^DIP-?14$/, 'DIP-14'], [/^DIP-?16$/, 'DIP-16'],
   ];
+  // 1列ピンヘッダ（2.54mm）・JST PH（2.0mm）は内蔵の KiCad 照合済みのものへ
+  const hdr = /^(?:PIN)?(?:HEADER|HDR)[-_]?1X0?(\d{1,2})(?!.*(?:2\.0|2MM|1\.27))/.exec(p);
+  if (hdr && getFootprint(`PinHeader_1x${hdr[1].padStart(2, '0')}_P2.54mm`)) return `PinHeader_1x${hdr[1].padStart(2, '0')}_P2.54mm`;
+  const ph = /^(?:JST[-_]?)?PH[-_]?(\d)P$|^JST[-_]?PH[-_]?(\d)/.exec(p);
+  if (ph) { const n = ph[1] || ph[2]; const id = `JST_PH_B${n}B-PH-K_1x0${n}_P2.00mm`; if (getFootprint(id)) return id; }
   // 幅広（300mil 等）は内蔵の細幅 SOIC と寸法が違うので、内蔵には当てはめない
   const wide = /300MIL|W7\.5|WIDE|-W7/.test(p);
   if (!wide) for (const [re, id] of table) if (re.test(p)) return id;
-  // 内蔵（照合予定）に無ければ、パッケージ名から標準寸法で自動生成（推定）
+  // 内蔵に無ければ、パッケージ名から標準寸法で自動生成（推定）
   const gen = generateFootprint(kind, pkg);
   return gen ? gen.id : '';
 }

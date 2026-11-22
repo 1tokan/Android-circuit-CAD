@@ -13,7 +13,7 @@
 // fn: X2 の .AperFunction（Conductor / SMDPad,CuDef / ComponentPad / ViaPad / Profile / NonConductor など）
 
 import { allPads, toMm, boardRect, fpToBoard, copperLayers, layerName } from '../pcb/model.js';
-import { silkSegments, pin1Mark, silkTexts, ROUNDRECT_RATIO } from '../pcb/shapes.js';
+import { silkSegments, pin1Mark, silkTexts, cornerRadius } from '../pcb/shapes.js';
 import { SILK_LINE_MM } from '../pcb/text.js';
 import { cachedFills, ringArea } from '../pcb/zonefill.js';
 import { drcRules } from '../check/drc.js';
@@ -70,7 +70,7 @@ export function padAperture(inst, pad, grow = 0) {
     return { kind: 'Oval', a: rel(-hx, -hy), b: rel(hx, hy), d: r4(d) };
   }
   if (pad.shape === 'roundrect') {
-    const r = Math.min(pad.w, pad.h) * ROUNDRECT_RATIO + grow;
+    const r = cornerRadius(pad) + grow;
     const ix = w / 2 - r, iy = h / 2 - r;
     return { kind: 'RoundRect', r: r4(r), corners: [rel(-ix, -iy), rel(ix, -iy), rel(ix, iy), rel(-ix, iy)] };
   }

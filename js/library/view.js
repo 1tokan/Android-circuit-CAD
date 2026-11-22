@@ -157,7 +157,7 @@ export function createPartsView(ctx) {
       ${Object.entries(p.specs).map(([k, v]) => kv(k, esc(v))).join('')}
       ${p.description ? `<p class="note">${esc(p.description)}</p>` : ''}
       <div class="pv-links">${links}</div>
-      <h4>シンボルとフットプリント（${esc(fp?.name || p.footprint || '未設定')}${fp?.generated ? ' <span class="badge planned">パッケージ名から自動生成・要確認</span>' : fp && !fp.verified ? ' <span class="badge planned">寸法未照合</span>' : ''}）</h4>
+      <h4>シンボルとフットプリント（${esc(fp?.name || p.footprint || '未設定')}${fp?.generated ? ' <span class="badge planned">パッケージ名から自動生成・要確認</span>' : fp && !fp.verified ? ' <span class="badge planned">寸法未照合</span>' : fp?.verified ? ' <span class="badge ready">KiCad 公式と照合済み</span>' : ''}）</h4>
       ${fp?.generated ? `<p class="note">${esc(fp.desc)}。標準寸法からの推定なので、発注前にデータシートの推奨ランドパターンと照合してください。</p>` : ''}
       <div class="pv-previews">${symbolPreviewSVG(p.kind, { pinCount: p.symbol.pinCount, pinNames: p.symbol.pinNames })}${footprintSVG(fp)}</div>
       <h4>ピン ↔ パッド対応</h4>${pinTable(p)}
