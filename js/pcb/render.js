@@ -1,5 +1,5 @@
 // PCB の SVG 描画（単位 mm）
-import { toMm, boardRect, copperLayers } from './model.js';
+import { toMm, boardRect, copperLayers, padHoleLocal, holeSvg } from './model.js';
 import { cornerRadius } from './shapes.js';
 import { silkSegments, pin1Mark, silkTexts } from './shapes.js';
 import { esc } from '../core/util.js';
@@ -26,7 +26,7 @@ function footprintLayer(f, layer, selected) {
     for (const p of f.fpDef.pads) {
       const cls = p.type === 'tht' ? 'pad tht' : `pad ${side === 'F' ? 'fcu' : 'bcu'}`;
       out.push(padSvg(p, cls));
-      if (p.type === 'tht') out.push(`<circle class="drill" cx="${p.x}" cy="${p.y}" r="${p.drill / 2}"/>`);
+      if (p.type === 'tht') out.push(holeSvg(padHoleLocal(p), 'drill'));
     }
   } else if (layer === 'Silk') {
     // 本体の外形線はパッドの周囲で切ってある（パッドにシルクを載せない）

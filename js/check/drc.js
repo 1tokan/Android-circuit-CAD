@@ -4,16 +4,17 @@
 //
 // 既定値は JLCPCB の 1〜2 層標準品の製造能力（2026年11月確認）に合わせる。プロジェクトの board.rules で上書きできる。
 
-import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg, copperLayers, layerName } from '../pcb/model.js';
+import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg, copperLayers, layerName, padHole } from '../pcb/model.js';
 import { computePcbConnectivity } from '../pcb/connectivity.js';
 import { padShape, trackShape, circleShape, silkSegments, silkTexts } from '../pcb/shapes.js';
 import { SILK_LINE_MM, unsupportedChars } from '../pcb/text.js';
 import { fpToBoard } from '../pcb/model.js';
-import { shapeDist, shapeSegDist, shapeBox, boxesNear, shapeCenter, nearestPoint, pointInRing } from '../core/geom2d.js';
+import { shapeDist, shapeSegDist, shapeBox, boxesNear, shapeCenter, nearestPoint, pointInRing, segSegDist } from '../core/geom2d.js';
 import { hash, sourceHash } from '../netlist/netlist.js';
 
 export { DRC_DEFAULTS, drcRules } from './rules.js';
 import { drcRules } from './rules.js';
+import pc from '../vendor/polygon-clipping.js';
 
 export const DRC_RULES = [
   { id: 'layer_missing', label: '層数より外の層（減らした内層）に残った配線・ベタ' },
@@ -114,7 +115,8 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   }
   for (const p of pads) {
     if (p.pad.type !== 'tht') continue;
-    const dr = p.pad.drill, ring = (Math.min(p.pad.w, p.pad.h) - dr) / 2, at = { x: p.x, y: p.y };
+    const dr = p.pad.drill, at = { x: p.x, y: p.y };
+    const ring = p.pad.slot ? Math.min((p.pad.w - p.pad.slot.w) / 2, (p.pad.h - p.pad.slot.h) / 2) : (Math.min(p.pad.w, p.pad.h) - dr) / 2;
     if (dr + 1e-9 < R.minPthDrillMm || dr > R.maxDrillMm) add('error', 'pad_drill', `${p.ref}-${p.pad.num}: 穴径 ${fmt(dr)}mm が範囲 ${R.minPthDrillMm}〜${R.maxDrillMm}mm の外です`, [p.ref], at);
     if (ring + 1e-9 < R.minAnnularRingMm) add('error', 'pad_drill', `${p.ref}-${p.pad.num}: ランド幅 ${fmt(ring)}mm が最小 ${R.minAnnularRingMm}mm 未満です`, [p.ref], at);
   }
@@ -164,13 +166,13 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
 
   // ---- 穴 ----
   const drills = [];
-  for (const p of pads) if (p.pad.type === 'tht') drills.push({ c: { x: p.x, y: p.y }, r: p.pad.drill / 2, net: p.net || `~${p.inst.id}:${p.pad.num}`, label: `${p.ref}-${p.pad.num}`, ref: p.ref });
+  for (const p of pads) if (p.pad.type === 'tht') { const h = padHole(p.inst, p.pad); drills.push({ c: { x: p.x, y: p.y }, a: h.a, b: h.b, r: h.d / 2, net: p.net || `~${p.inst.id}:${p.pad.num}`, label: `${p.ref}-${p.pad.num}${h.slot ? '（長穴）' : ''}`, ref: p.ref }); }
   for (const v of pcb.vias) drills.push({ c: { x: toMm(v.x), y: toMm(v.y) }, r: toMm(v.drill) / 2, net: v.net || `~v:${v.id}`, label: 'ビア' });
   for (const h of pcb.holes) drills.push({ c: { x: toMm(h.x), y: toMm(h.y) }, r: toMm(h.drill) / 2, net: `~h:${h.id}`, label: `取付穴 φ${fmt(toMm(h.drill))}`, npth: true });
   for (let i = 0; i < drills.length; i++) for (let j = i + 1; j < drills.length; j++) {
     const a = drills[i], b = drills[j];
     if (a.net === b.net) continue;
-    const gap = Math.hypot(a.c.x - b.c.x, a.c.y - b.c.y) - a.r - b.r;
+    const gap = segSegDist(a.a || a.c, a.b || a.c, b.a || b.c, b.b || b.c) - a.r - b.r;
     if (gap < R.minHoleToHoleMm - 1e-6) add('error', 'hole_to_hole', `穴の間隔不足: ${a.label} と ${b.label}（縁どうし ${fmt(Math.max(0, gap))}mm、最小 ${R.minHoleToHoleMm}mm）`, [a.ref, b.ref].filter(Boolean), midPt(a.c, b.c));
   }
   for (const h of pcb.holes) {
@@ -332,7 +334,12 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     const a = pcb.zones[i], b = pcb.zones[j];
     if (a.layer !== b.layer || a.net === b.net) continue;
     const ba = polyBox(a.polygon), bb = polyBox(b.polygon);
-    if (ba.x0 < bb.x1 && bb.x0 < ba.x1 && ba.y0 < bb.y1 && bb.y0 < ba.y1) add('error', 'zone_overlap', `${a.layer} で ${a.net || 'ネットなし'} と ${b.net || 'ネットなし'} のベタの範囲が重なっています（重なるベタの塗り分けは未対応のため、範囲を分けてください）`, [], null);
+    if (!(ba.x0 < bb.x1 && bb.x0 < ba.x1 && ba.y0 < bb.y1 && bb.y0 < ba.y1)) continue;
+    // 外接矩形が重なっても、多角形どうしが重ならなければよい（L 字のベタなど）
+    const ring = (z) => [z.polygon.map((q) => [toMm(q.x), toMm(q.y)])];
+    let inter = [];
+    try { inter = pc.intersection(ring(a), ring(b)); } catch { inter = [[[]]]; }
+    if (inter.some((poly) => Math.abs(ringAreaMm(poly[0] || [])) > 1e-6)) add('error', 'zone_overlap', `${a.layer} で ${a.net || 'ネットなし'} と ${b.net || 'ネットなし'} のベタの範囲が重なっています（重なるベタの塗り分けは未対応のため、範囲を分けてください）`, [], null);
   }
 
   if (dropped) issues.push({ level: 'warning', rule: 'limit', message: `ほかに ${dropped} 件あります（先頭 ${limit} 件のみ表示）`, refs: [], at: null });
@@ -366,3 +373,5 @@ function polyBox(poly) {
   const xs = poly.map((q) => toMm(q.x)), ys = poly.map((q) => toMm(q.y));
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
 }
+
+function ringAreaMm(r) { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }

@@ -7,7 +7,7 @@ VERSION=$(node -p "require('./package.json').version")
 CODE=${BUILD_NUMBER:-1}
 
 rm -rf www android dist && mkdir -p www dist
-cp -r index.html manifest.webmanifest sw.js css js icons www/
+cp -r index.html manifest.webmanifest sw.js css js icons samples www/
 
 # Capacitor は package.json の dependencies に書かれたプラグインだけを組み込むので、--save で入れる（CI上のみの変更）
 npm i --no-package-lock --no-audit --no-fund \

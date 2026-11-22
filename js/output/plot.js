@@ -12,7 +12,7 @@
 //  { t:'region', rings:[[x,y]...], dark, fn }    … ベタ（外周は dark、穴は clear で抜く）
 // fn: X2 の .AperFunction（Conductor / SMDPad,CuDef / ComponentPad / ViaPad / Profile / NonConductor など）
 
-import { allPads, toMm, boardRect, fpToBoard, copperLayers, layerName } from '../pcb/model.js';
+import { allPads, toMm, boardRect, fpToBoard, copperLayers, layerName, padHole } from '../pcb/model.js';
 import { silkSegments, pin1Mark, silkTexts, cornerRadius } from '../pcb/shapes.js';
 import { SILK_LINE_MM } from '../pcb/text.js';
 import { cachedFills, ringArea } from '../pcb/zonefill.js';
@@ -122,7 +122,10 @@ export function buildPlot(project, pcb, opt = {}) {
       L[`${side}.Mask`].push({ t: 'flash', ap: padAperture(p.inst, p.pad, mask), at, fn: smd ? 'SMDPad,CuDef' : 'ComponentPad' });
       if (smd && !p.inst.dnp) L[`${side}.Paste`].push({ t: 'flash', ap: padAperture(p.inst, p.pad), at, fn: 'SMDPad,CuDef' });
     }
-    if (!smd) pthDrills.push({ x: p.x, y: p.y, d: p.pad.drill, fn: 'ComponentDrill' });
+    if (!smd) {
+      const h = padHole(p.inst, p.pad);
+      pthDrills.push(h.slot ? { x: p.x, y: p.y, d: h.d, fn: 'ComponentDrill', slot: { a: h.a, b: h.b } } : { x: p.x, y: p.y, d: p.pad.drill, fn: 'ComponentDrill' });
+    }
   }
   // ---- ビア ----
   for (const v of pcb.vias) {

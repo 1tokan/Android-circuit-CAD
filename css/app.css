@@ -305,6 +305,7 @@ button { font: inherit; color: inherit; }
 .fp-preview { width: 150px; height: 110px; }
 .fp-preview .pad rect, .fp-preview .pad circle { fill: #c8a24a; }
 .fp-preview .pad .hole { fill: var(--canvas); }
+.fp-preview .pad .hole.slot { fill: none; stroke: var(--canvas); }
 .fp-preview .pad text { fill: #1a1a1a; text-anchor: middle; font-family: system-ui, sans-serif; font-weight: 700; }
 .fp-preview .court { fill: none; stroke: #7a5ca8; stroke-width: 0.05; stroke-dasharray: 0.2 0.15; }
 .fp-preview .origin { stroke: #fff; stroke-width: 0.05; }
@@ -354,6 +355,7 @@ button { font: inherit; color: inherit; }
 #pcb-content .pad.tht { fill: var(--tht); }
 #pcb-content .fp.sel .pad { fill: #ffd27a; }
 #pcb-content .drill { fill: #0b0b0b; }
+#pcb-content .drill.slot { fill: none; stroke: #0b0b0b; }
 #pcb-content .via { fill: #9aa3ad; }
 #pcb-content .via.sel { fill: var(--sel); }
 #pcb-content .hole { fill: #0b0b0b; stroke: var(--edge); stroke-width: 0.1; }
@@ -479,3 +481,4 @@ button { font: inherit; color: inherit; }
 .v3d-canvas canvas { display: block; touch-action: none; }
 .v3d-tools { padding: 8px 12px 0; }
 .v3d-note { margin: 6px 12px; padding-bottom: env(safe-area-inset-bottom); font-size: 12px; }
+.dialog ul.plain, ul.plain { padding-left: 1.2em; max-height: 40vh; overflow: auto; font-size: 13px; }

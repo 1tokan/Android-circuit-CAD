@@ -144,7 +144,12 @@ export function writeExcellon(holes, plated, meta, layers = 2) {
   const f = (v) => { const r = Math.round(v * 1000) / 1000; return (r === 0 ? 0 : r).toFixed(3); };
   sizes.forEach((d, i) => {
     out.push(`T${i + 1}`);
-    for (const h of holes) if (Math.round(h.d * 1000) / 1000 === d) out.push(`X${f(h.x)}Y${f(-h.y)}`);
+    for (const h of holes) {
+      if (Math.round(h.d * 1000) / 1000 !== d) continue;
+      // 長穴は G85（始点→終点を同じ工具で削る）
+      if (h.slot) out.push(`X${f(h.slot.a.x)}Y${f(-h.slot.a.y)}G85X${f(h.slot.b.x)}Y${f(-h.slot.b.y)}`);
+      else out.push(`X${f(h.x)}Y${f(-h.y)}`);
+    }
   });
   out.push('M30', '');
   return out.join('\n');

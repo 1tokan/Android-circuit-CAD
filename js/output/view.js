@@ -87,7 +87,7 @@ export function createOutputView(ctx) {
     for (const id of ORDER) {
       if (!st.show.has(id) || (!plot.layers[id] && id !== 'drill')) continue;
       if (id === 'drill') {
-        g.push(`<g fill="#000">${[...plot.drills.pth, ...plot.drills.npth].map((h) => `<circle cx="${h.x}" cy="${h.y}" r="${h.d / 2}"/>`).join('')}</g>`);
+        g.push(`<g fill="#000" stroke="#000">${[...plot.drills.pth, ...plot.drills.npth].map((h) => h.slot ? `<path d="M${h.slot.a.x} ${h.slot.a.y}L${h.slot.b.x} ${h.slot.b.y}" stroke-width="${h.d}" stroke-linecap="round"/>` : `<circle cx="${h.x}" cy="${h.y}" r="${h.d / 2}" stroke="none"/>`).join('')}</g>`);
         continue;
       }
       g.push(`<g class="pl ${id.replace('.', '-')}" opacity="${/Mask/.test(id) ? 0.55 : 0.9}">${plotLayerSvg(plot.layers[id], PREVIEW[id].color)}</g>`);

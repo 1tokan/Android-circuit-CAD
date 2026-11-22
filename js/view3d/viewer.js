@@ -74,7 +74,13 @@ function boardShape(plot) {
   s.moveTo(b.x0, b.y0); s.lineTo(b.x1, b.y0); s.lineTo(b.x1, b.y1); s.lineTo(b.x0, b.y1); s.closePath();
   for (const h of [...plot.drills.pth, ...plot.drills.npth]) {
     const p = new THREE.Path();
-    p.absarc(h.x, h.y, h.d / 2, 0, Math.PI * 2, true);
+    if (h.slot) {
+      // 長穴: 両端の半円をつないだ形
+      const { a, b } = h.slot, r = h.d / 2, ang = Math.atan2(b.y - a.y, b.x - a.x);
+      p.absarc(a.x, a.y, r, ang + Math.PI / 2, ang + Math.PI * 1.5, false);
+      p.absarc(b.x, b.y, r, ang - Math.PI / 2, ang + Math.PI / 2, false);
+      p.closePath();
+    } else p.absarc(h.x, h.y, h.d / 2, 0, Math.PI * 2, true);
     s.holes.push(p);
   }
   return s;
@@ -123,13 +129,15 @@ const GOLD = () => mat('#d4af37', { metalness: 0.9, roughness: 0.25 });
 /** パッケージから高さ・色・形を決める */
 function partStyle(f) {
   const id = String(f.fpDef.id), pkg = String(f.fpDef.package || id).toUpperCase(), v = String(f.value || '').toUpperCase();
+  // 線をはんだ付けするパッド・テストパッドは部品が載らない（パッドだけ見せる）
+  if (/^(SolderWirePad|TestPad|SolderJumper)/i.test(id)) return { none: true };
   if (/^R_\d/.test(id)) return { h: 0.45, color: '#1d1d1d', ends: true };
   if (/^C_\d/.test(id)) return { h: 0.6, color: '#b8946a', ends: true };
   if (/^L_\d/.test(id)) return { h: 0.6, color: '#3a3a3a', ends: true };
   if (/^LED_/.test(id)) return { h: 0.6, color: /GREEN|緑/.test(v) ? '#47d16b' : /BLUE|青/.test(v) ? '#4a86ff' : /YELLOW|黄/.test(v) ? '#ffd23f' : /WHITE|白/.test(v) ? '#f3f3f3' : '#ff3b30', ends: true, glow: true };
   if (/^CP_ELEC/.test(id.toUpperCase())) return { cyl: true, h: 5.4, color: '#c8c8cc' };
   if (/^PINHEADER/.test(id.toUpperCase())) return { header: true, h: 2.5, color: '#111' };
-  if (/^JST_PH/.test(id.toUpperCase())) return { h: 6.0, color: '#efe6cf' };
+  if (/^JST_PH/.test(id.toUpperCase())) return { h: /HORIZONTAL/i.test(id) ? 4.8 : 6.0, color: '#efe6cf' };
   if (/^SW_PUSH/.test(id.toUpperCase())) return { h: 3.5, color: '#202020', button: true };
   if (/^DIP/.test(pkg)) return { h: 3.3, lift: 0.5, color: DARK, pin1: true };
   if (/SOT-?223|DPAK|TO-252/.test(pkg)) return { h: 1.6, color: DARK, pin1: true };
@@ -168,6 +176,7 @@ function buildPart(f, t) {
     return m;
   };
   const cx = b.cx || 0, cy = b.cy || 0;
+  if (s.none) return g;
   if (s.cyl) {
     box(b.w, b.h, 0.6, mat('#1b1b1b'), cx, cy, 0);
     cyl(Math.min(b.w, b.h) / 2 * 0.95, s.h - 0.6, mat(s.color, { metalness: 0.6, roughness: 0.35 }), cx, cy, 0.6);

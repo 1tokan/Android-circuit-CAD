@@ -6,6 +6,7 @@ import {
 } from './model.js';
 import { computePcbConnectivity, snapTarget } from './connectivity.js';
 import { drcRules } from '../check/rules.js';
+import { autoroute } from './autoroute.js';
 import { renderPcb } from './render.js';
 import { esc } from '../core/util.js';
 
@@ -97,6 +98,7 @@ export function createPcbEditor(ctx) {
       const br = boardRect(pcb());
       const outside = pcb().footprints.filter((f) => { const b = fpBox(f); return b.x1 < br.x0 || b.x0 > br.x1 || b.y1 < br.y0 || b.y0 > br.y1; }).length;
       if (outside) c.push(chip('arrange', `基板内に並べる（${outside}）`, true));
+      if (!outside && st.conn?.unrouted) c.push(chip('autoroute', `自動配線（${st.conn.unrouted}）`, true));
       c.push(chip('multi', st.multi ? '複数選択 ON' : '複数選択', st.multi), layerChip);
       if (st.sel.size) c.push(chip('props', '属性'), chip('rotate', '回転'), chip('flip', '裏返す'), chip('delete', '削除'), chip('clear', '解除'));
       c.push(info);
@@ -126,6 +128,7 @@ export function createPcbEditor(ctx) {
         else if (r) ctx.ui.toast(`${r.moved.length}個を基板内に並べました。位置を整えてから配線してください`);
         break;
       }
+      case 'autoroute': await autorouteDialog(); break;
       case 'multi': st.multi = !st.multi; break;
       case 'layer': st.layer = nextLayer(); break;
       case 'props': await editProps(); break;
@@ -300,6 +303,50 @@ export function createPcbEditor(ctx) {
     const btns = WIDTHS.map((w) => `<button type="button" class="btn list-btn" data-key="${w}">${w} mm</button>`).join('');
     const r = await ctx.ui.ask('配線幅', `<p class="note">設計ルールの最小配線幅は ${drcRules(ctx.getProject()).minTrackWidthMm}mm です（DRCで検査）。電源・GNDは太めに。</p>${btns}`, [{ label: '閉じる', value: '' }], true);
     if (r) edit((b) => { b.settings.trackWidth = toNm(Number(r)); }, '配線幅');
+  }
+
+  // ---------------- 自動配線 ----------------
+  let routing = false;
+  async function autorouteDialog() {
+    if (routing) return;
+    const b = pcb(), cu = copperLayers(b), rules = drcRules(ctx.getProject());
+    const inner = cu.filter((l) => l !== 'F.Cu' && l !== 'B.Cu');
+    const sigW = Math.max(rules.minTrackWidthMm, 0.15);
+    const html = `<div class="form">
+      <label class="field"><span>使う層</span><select name="layers">
+        <option value="F.Cu,B.Cu">表と裏</option>
+        ${inner.length ? `<option value="F.Cu,${inner[inner.length - 1]},B.Cu" selected>表・裏＋${esc(layerName(inner[inner.length - 1]))}（内層1枚を信号にも使う）</option>` : ''}
+        <option value="F.Cu">表だけ</option>
+      </select></label>
+      <label class="field"><span>信号の線幅 (mm)</span><input type="text" name="w" inputmode="decimal" value="${sigW}"></label>
+      <label class="field"><span>電源・GND の線幅 (mm)</span><input type="text" name="pw" inputmode="decimal" value="0.3"></label>
+      <p class="note">まだつながっていない接続（未配線 ${st.conn?.unrouted ?? 0} 本）を、設計ルールの間隔を守って引きます。今ある配線・ビアは動かしません。引けなかった接続は一覧で知らせます（部品を動かすか手で引いてください）。終わったら「元に戻す」で取り消せます。内層のベタ（GND・電源の面）へはビアでつながっていれば配線済みとみなします。</p>
+    </div>`;
+    const r = await ctx.ui.ask('自動配線', html, [{ label: 'キャンセル', value: '' }, { label: '配線する', value: 'ok', cls: 'primary' }]);
+    if (r !== 'ok') return;
+    const layers = $('#dialog-body [name="layers"]').value.split(',');
+    const w = Number($('#dialog-body [name="w"]').value), pw = Number($('#dialog-body [name="pw"]').value);
+    if (!(w >= rules.minTrackWidthMm) || !(pw >= w)) { ctx.ui.toast(`線幅は ${rules.minTrackWidthMm}mm 以上、電源は信号以上にしてください`, true); return; }
+    routing = true;
+    const work = structuredClone({ ...b });
+    const t0 = Date.now();
+    let res;
+    try {
+      ctx.ui.toast('自動配線中…');
+      res = await autoroute(work, rules, { layers, trackWidth: w, powerWidth: pw, yieldEvery: 2, onProgress: (d, n) => { if (Date.now() - t0 > 400) ctx.ui.toast(`自動配線中… ${d}/${n}`); } });
+    } catch (e) {
+      routing = false;
+      ctx.ui.toast(`自動配線に失敗しました: ${e.message}`, true);
+      return;
+    }
+    routing = false;
+    edit((p) => { p.tracks = work.tracks; p.vias = work.vias; }, '自動配線');
+    render();
+    const sec = ((Date.now() - t0) / 1000).toFixed(1);
+    if (res.failed.length) {
+      const list = res.failed.map((f) => `<li>${esc(f.net)}: ${esc(f.a)} → ${esc(f.b)}</li>`).join('');
+      await ctx.ui.ask('自動配線の結果', `<p>${res.routed.length} 本引きました（ビア ${res.vias} 個・${sec} 秒）。引けなかった接続が ${res.failed.length} 本あります。</p><ul class="plain">${list}</ul><p class="note">周りの部品を少し離すか、別の層を選んで、もう一度実行してください。</p>`, [{ label: '閉じる', value: '' }]);
+    } else ctx.ui.toast(`${res.routed.length} 本を引きました（ビア ${res.vias} 個・${sec} 秒）。検査（DRC）で確認してください`);
   }
 
   // ---------------- その他のツール ----------------

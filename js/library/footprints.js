@@ -161,8 +161,16 @@ export function normalizeFootprint(def) {
     for (const k of ['x', 'y', 'w', 'h']) if (!Number.isFinite(n[k])) throw new Error(`${def.id}: パッド${n.num} の ${k} が数値ではありません`);
     if (n.w <= 0 || n.h <= 0) throw new Error(`${def.id}: パッド${n.num} の寸法が0以下です`);
     if (n.type === 'tht') {
-      n.drill = Number(p.drill);
-      if (!(n.drill > 0) || n.drill >= Math.min(n.w, n.h)) throw new Error(`${def.id}: パッド${n.num} の穴径が不正です`);
+      if (p.slot) {
+        // 長穴: slot = { w, h }（パッドの向きでの外形）。drill は短い方
+        const sw = Number(p.slot.w), sh = Number(p.slot.h);
+        if (!(sw > 0 && sh > 0) || sw >= n.w || sh >= n.h) throw new Error(`${def.id}: パッド${n.num} の長穴の寸法が不正です（パッドより小さく）`);
+        n.slot = { w: sw, h: sh };
+        n.drill = Math.min(sw, sh);
+      } else {
+        n.drill = Number(p.drill);
+        if (!(n.drill > 0) || n.drill >= Math.min(n.w, n.h)) throw new Error(`${def.id}: パッド${n.num} の穴径が不正です`);
+      }
     }
     if (!['rect', 'roundrect', 'circle', 'oval'].includes(n.shape)) throw new Error(`${def.id}: パッド${n.num} の形状 ${n.shape} は未対応です`);
     return n;

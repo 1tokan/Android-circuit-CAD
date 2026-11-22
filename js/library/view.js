@@ -8,6 +8,7 @@ import {
 import { importCSV, importJSON, exportLibraryJSON } from './importer.js';
 import { symbolPreviewSVG } from '../schematic/render.js';
 import { esc } from '../core/util.js';
+import { padHoleLocal, holeSvg } from '../pcb/model.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const PART_KINDS = KINDS.filter((k) => !k.power);
@@ -113,7 +114,7 @@ export function createPartsView(ctx) {
     const pads = fp.pads.map((p) => {
       const shape = p.shape === 'circle' ? `<circle cx="${p.x}" cy="${p.y}" r="${p.w / 2}"/>`
         : `<rect x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 : p.shape === 'roundrect' ? Math.min(p.w, p.h) * 0.25 : 0}"/>`;
-      const hole = p.type === 'tht' ? `<circle class="hole" cx="${p.x}" cy="${p.y}" r="${p.drill / 2}"/>` : '';
+      const hole = p.type === 'tht' ? holeSvg(padHoleLocal(p), 'hole') : '';
       const fs = Math.max(0.3, Math.min(p.w, p.h) * 0.55);
       return `<g class="pad">${shape}${hole}<text x="${p.x}" y="${p.y}" font-size="${fs}" dy="${fs * 0.35}">${esc(p.num)}</text></g>`;
     }).join('');

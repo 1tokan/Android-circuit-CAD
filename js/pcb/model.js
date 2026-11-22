@@ -70,6 +70,26 @@ export function boardToFp(inst, bx, by) {
   return { x: inst.side === 'bottom' ? -x : x, y };
 }
 
+/**
+ * パッドの穴（フットプリント内の座標）。丸穴は a=b、長穴は両端の中心。d は穴の幅
+ * 長穴は pad.slot = { w, h }（パッドの向きでの長穴の外形）。drill は短い方
+ */
+export function padHoleLocal(pad) {
+  if (!pad.slot) return { a: { x: pad.x, y: pad.y }, b: { x: pad.x, y: pad.y }, d: pad.drill };
+  const { w, h } = pad.slot, d = Math.min(w, h), half = (Math.max(w, h) - d) / 2;
+  return w >= h ? { a: { x: pad.x - half, y: pad.y }, b: { x: pad.x + half, y: pad.y }, d } : { a: { x: pad.x, y: pad.y - half }, b: { x: pad.x, y: pad.y + half }, d };
+}
+/** パッドの穴（基板座標 mm） */
+export function padHole(inst, pad) {
+  const l = padHoleLocal(pad);
+  return { a: fpToBoard(inst, l.a.x, l.a.y), b: fpToBoard(inst, l.b.x, l.b.y), d: l.d, slot: !!pad.slot };
+}
+/** 穴の SVG（丸穴は円、長穴は丸端の線） */
+export function holeSvg(h, cls) {
+  if (h.a.x === h.b.x && h.a.y === h.b.y) return `<circle class="${cls}" cx="${h.a.x}" cy="${h.a.y}" r="${h.d / 2}"/>`;
+  return `<path class="${cls} slot" d="M${h.a.x} ${h.a.y}L${h.b.x} ${h.b.y}" stroke-width="${h.d}" stroke-linecap="round"/>`;
+}
+
 export function padLayers(inst, pad, cu = ['F.Cu', 'B.Cu']) {
   if (pad.type === 'tht') return cu;
   return [inst.side === 'bottom' ? 'B.Cu' : 'F.Cu'];

@@ -150,9 +150,9 @@ export function fillZone(pcb, z, rules = {}) {
     obstacles.push([capsulePoly(c, c, toMm(h.drill) / 2 + P.npth)]);
   }
 
-  let fill = obstacles.length ? pc.difference(area, ...obstacles) : area;
+  let fill = obstacles.length ? safeDifference(area, obstacles) : area;
   if (gaps.length && fill.length) {
-    const cut = pc.difference(fill, ...gaps);
+    const cut = safeDifference(fill, gaps);
     const sp = spokes.length ? pc.intersection(pc.union(...spokes), fill) : [];
     fill = sp.length ? pc.union(cut, sp) : cut;
   }
@@ -166,6 +166,32 @@ export function fillZone(pcb, z, rules = {}) {
   const r6 = (v) => Math.round(v * 1e5) / 1e5;
   const polygons = fill.map((poly) => poly.map((ring) => ring.map(([x, y]) => [r6(x), r6(y)])));
   return { polygons, islandsRemoved, params: P };
+}
+
+/**
+ * polygon-clipping は、ほぼ同じ直線上に並ぶ短い辺が重なると稀に計算に失敗する（SweepLine の例外）。
+ * そのときは障害物を1つずつ引き、失敗した障害物はほんの少し（0.2µm）太らせて引き直す。
+ * 太らせるのは障害物側なので、間隔は狭くならない。
+ */
+function safeDifference(base, subs) {
+  try { return pc.difference(base, ...subs); } catch { /* 1つずつにする */ }
+  let out = base;
+  for (const s of subs) {
+    if (!out.length) break;
+    let ok = false;
+    for (let k = 0; k < 4 && !ok; k++) {
+      try { out = pc.difference(out, k ? grow(s, 0.0002 * k) : s); ok = true; } catch { /* 少し太らせて再試行 */ }
+    }
+    if (!ok) throw new Error('ベタの計算に失敗しました（形が複雑すぎます）');
+  }
+  return out;
+}
+/** 多角形を重心から外へ d だけ広げる（凸形の障害物用の近似） */
+function grow(poly, d) {
+  return poly.map((ring) => {
+    const cx = ring.reduce((a, p) => a + p[0], 0) / ring.length, cy = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+    return ring.map(([x, y]) => { const l = Math.hypot(x - cx, y - cy) || 1; return [x + ((x - cx) / l) * d * 2, y + ((y - cy) / l) * d * 2]; });
+  });
 }
 
 /** 塗りつぶし結果に影響する情報のハッシュ */

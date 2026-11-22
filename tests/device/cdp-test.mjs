@@ -146,6 +146,51 @@ await step('テストD を開いて PCB を表示（描画時間）', async () =
   return { projectId: r, renderMs: t };
 });
 
+await step('同梱サンプル「USB DAC アンプ」を画面から開き、ERC/DRC と 3D 表示（時間）', async () => {
+  await tapSelector('#btn-projects');
+  await sleep(500);
+  await tapSelector('#btn-sample');
+  await sleep(500);
+  await tapSelector('#dialog-actions button[value="usb-dac-amp"]');
+  for (let i = 0; i < 40; i++) { if (await evaluate("/USB DAC アンプ/.test(window.pocketEDA.state.project?.name || '')")) break; await sleep(250); }
+  const r = await evaluate(`(async () => {
+    const p = window.pocketEDA.state.project;
+    if (!/USB DAC アンプ/.test(p.name)) throw new Error('サンプルが開かない: ' + p.name);
+    const { runErc } = await import('./js/check/erc.js');
+    const { runDrc } = await import('./js/check/drc.js');
+    const { fillAllZones } = await import('./js/pcb/zonefill.js');
+    const { drcRules } = await import('./js/check/rules.js');
+    let t = performance.now();
+    const e = runErc(p);
+    const ercMs = performance.now() - t; t = performance.now();
+    fillAllZones(p.pcb, drcRules(p));
+    const d = runDrc(p, p.pcb);
+    const drcMs = performance.now() - t;
+    return { tracks: p.pcb.tracks.length, ercErrors: e.summary.errors, drcErrors: d.summary.errors, unrouted: d.summary.unrouted, ercMs: Math.round(ercMs), drcMs: Math.round(drcMs) };
+  })()`);
+  if (r.ercErrors || r.drcErrors || r.unrouted) throw new Error('サンプルの検査結果: ' + JSON.stringify(r));
+  await tapSelector('#ws-nav button[data-ws="pcb"]');
+  await tapSelector('#btn-zoom-fit');
+  await sleep(1500);
+  await shot('02b-sample-pcb');
+  await tapSelector('#ws-nav button[data-ws="output"]');
+  await sleep(1000);
+  const t0 = Date.now();
+  await tapSelector('[data-3d]');
+  let ok = false;
+  for (let i = 0; i < 60; i++) { if (await evaluate("!!document.querySelector('#viewer3d')?._viewer")) { ok = true; break; } await sleep(250); }
+  const open3dMs = Date.now() - t0;
+  const gl = await evaluate("(() => { const v = document.querySelector('#viewer3d')._viewer; return v ? { parts: v.stats.parts } : null; })()");
+  if (!ok || !gl || gl.parts < 60) throw new Error('3D 表示が開かない: ' + JSON.stringify(gl));
+  await sleep(800);
+  await shot('02c-sample-3d');
+  await evaluate('window.pocketEDA.back()');
+  await sleep(500);
+  await tapSelector('#ws-nav button[data-ws="pcb"]');
+  await sleep(500);
+  return { ...r, open3dMs, parts3d: gl.parts };
+});
+
 await step('Android の戻るボタン: ドロワーを閉じる → 回路図へ戻る', async () => {
   await tapSelector('#btn-projects');
   if (await evaluate("document.querySelector('#drawer').hidden")) throw new Error('ドロワーが開かない');

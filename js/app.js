@@ -27,7 +27,7 @@ import { moduleById } from './modules/registry.js';
 import { esc } from './core/util.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 
 const state = {
   project: null,
@@ -622,6 +622,38 @@ async function importFile(file) {
   toast(`「${p.name}」を読み込みました`);
 }
 
+// ---------------- サンプル ----------------
+// アプリに同梱した設計例。開くたびに新しいプロジェクトとして追加する（元のサンプルは変わらない）
+export const SAMPLES = [
+  { id: 'usb-dac-amp', file: './samples/usb-dac-amp.json', name: 'USB DAC アンプ',
+    desc: 'USB-C（バスパワー）→ ESP32-S3（USB オーディオ）→ 32bit DAC。3.5mm ヘッドホンと 8Ω スピーカー 2ch。60×20mm・4層・配線済み' },
+];
+
+async function openSample(id = null) {
+  let s = SAMPLES.find((x) => x.id === id);
+  if (!s) {
+    const r = await ask('サンプルを開く', `<ul class="plain">${SAMPLES.map((x) => `<li><b>${esc(x.name)}</b><br><span class="note">${esc(x.desc)}</span></li>`).join('')}</ul><p class="note">新しいプロジェクトとして追加します。部品の値・品番は設計例です。発注前に必ずデータシートで確かめてください。</p>`,
+      [{ label: 'キャンセル', value: '' }, ...SAMPLES.map((x) => ({ label: `「${x.name}」を開く`, value: x.id, cls: 'primary' }))]);
+    s = SAMPLES.find((x) => x.id === r);
+    if (!s) return null;
+  }
+  let p;
+  try {
+    const res = await fetch(s.file);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    p = asCopy(parseProject(await res.text()));
+    p.name = `${s.name}（サンプル）`;
+  } catch (e) {
+    toast('サンプルを読み込めませんでした: ' + e.message, true);
+    return null;
+  }
+  await store.saveProject(p);
+  await openProject(p);
+  closeDrawer();
+  toast(`サンプル「${s.name}」を開きました`);
+  return p;
+}
+
 async function showBackups() {
   const rows = await store.listBackups(state.project.id);
   if (!rows.length) { toast('保存履歴はありません'); return; }
@@ -702,6 +734,7 @@ function bindUI() {
     closeDrawer();
   };
   $('#btn-import').onclick = () => $('#file-import').click();
+  $('#btn-sample').onclick = () => openSample();
   $('#file-import').onchange = (e) => {
     const f = e.target.files[0];
     e.target.value = '';
@@ -925,6 +958,6 @@ async function boot() {
 }
 
 // 開発・テスト用の操作口（コンソールから使える）
-window.pocketEDA = { state, jumpTo, back: handleBack, openProject, openAi, open3d, applyAiSpec, native: NATIVE, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
+window.pocketEDA = { state, openSample, jumpTo, back: handleBack, openProject, openAi, open3d, applyAiSpec, native: NATIVE, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
 
 boot();

@@ -12,7 +12,7 @@ export async function loadModules(base) {
     im('js/library/footprints.js'), im('js/netlist/netlist.js'), im('js/pcb/model.js'), im('js/pcb/zonefill.js'),
     im('js/check/erc.js'), im('js/check/drc.js'), im('js/output/plot.js'), im('js/output/gerber.js'), im('js/output/zip.js'), im('js/output/assembly.js'), im('js/ai/spec.js'),
   ]);
-  return { project, model, conn, parts, fps, netlist, pcb, zonefill, erc, drc, plot, gerber, zip, asm, ai };
+  return { base, project, model, conn, parts, fps, netlist, pcb, zonefill, erc, drc, plot, gerber, zip, asm, ai };
 }
 
 /**
@@ -101,7 +101,7 @@ export const SPECS = {
 const now = () => (globalThis.performance ? performance.now() : Date.now());
 
 /** 通しの実行。各工程の結果と時間（ms）を返す */
-export async function runPipeline(M, key, { boards = 5, layers = 2 } = {}) {
+export async function runPipeline(M, key, { boards = 5, layers = 2, route = false } = {}) {
   const spec = SPECS[key];
   const t = {};
   const lap = async (name, fn) => { const s = now(); const r = await fn(); t[name] = Math.round((now() - s) * 10) / 10; return r; };
@@ -125,6 +125,11 @@ export async function runPipeline(M, key, { boards = 5, layers = 2 } = {}) {
     const pw = nl.nets.map((n) => n.name).find((n) => /^\+|VBUS|VCC/.test(n));
     if (pw) M.pcb.addBoardZone(pcb, 'In2.Cu', pw);
   }
+  let routed = null;
+  if (route) {
+    const { autoroute } = await import(new URL('js/pcb/autoroute.js', M.base).href);
+    routed = await lap('autoroute', () => autoroute(pcb, M.drc.drcRules(prj), { layers: ['F.Cu', 'B.Cu'] }));
+  }
   const fills = await lap('zoneFill', () => M.zonefill.fillAllZones(pcb, M.drc.drcRules(prj)));
   const drc = await lap('drc', () => M.drc.runDrc(prj, pcb));
   const plot = await lap('plot', () => M.plot.buildPlot(prj, pcb));
@@ -141,6 +146,7 @@ export async function runPipeline(M, key, { boards = 5, layers = 2 } = {}) {
     components: nl.components.length, nets: nl.nets.length, netlistErrors: nl.problems.filter((p) => p.level === 'error').map((p) => p.message),
     netMismatch,
     erc: { errors: erc.summary.errors, warnings: erc.summary.warnings, byRule: byRule(erc), errorMessages: erc.issues.filter((i) => i.level === 'error').map((i) => i.message) },
+    routed: routed && { ok: routed.routed.length, failed: routed.failed, vias: routed.vias },
     board: { w, h }, arranged: { moved: arranged.moved.length, notFit: arranged.notFit },
     zone: [...fills.values()].map((f) => ({ polygons: f.polygons.length, islandsRemoved: f.islandsRemoved })),
     drc: { errors: drc.summary.errors, warnings: drc.summary.warnings, byRule: byRule(drc), unrouted: drc.summary.unrouted },
