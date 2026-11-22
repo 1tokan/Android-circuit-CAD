@@ -1,0 +1,9 @@
+{
+  "appId": "jp.tokan.pocketeda",
+  "appName": "Pocket EDA",
+  "webDir": "www",
+  "android": { "backgroundColor": "#14181f" },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  }
+}

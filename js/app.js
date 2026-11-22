@@ -215,7 +215,24 @@ function usePartInProject(part) {
 }
 function switchWorkspace(id) { state.workspace = id; renderAll(); }
 
-function download(name, text, type = 'text/plain') {
+/** Android アプリ版（Capacitor）で動いているか */
+const NATIVE = !!globalThis.Capacitor?.isNativePlatform?.();
+
+/**
+ * ファイルの書き出し。ブラウザはダウンロード、Android アプリ版は
+ * キャッシュに書いてから共有シート（Googleドライブ・ファイル・メール等へ保存・送信）を開く。
+ */
+async function download(name, text, type = 'text/plain') {
+  if (NATIVE) {
+    const { Filesystem, Share } = globalThis.Capacitor.Plugins;
+    try {
+      const r = await Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
+      await Share.share({ title: name, files: [r.uri], dialogTitle: `${name} を保存・共有` });
+    } catch (e) {
+      if (!/cancel/i.test(String(e?.message))) toast('書き出せませんでした: ' + (e?.message || e), true);
+    }
+    return;
+  }
   const blob = new Blob([text], { type });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -518,7 +535,7 @@ function bindUI() {
     if (act === 'annotate') { state.editor.reannotate(); toast('部品番号を位置順に振り直しました'); }
     if (act === 'netlist') showNetlist();
     if (act === 'about') {
-      ask('Pocket EDA', `<p>バージョン ${APP_VERSION}（第3段階: 部品ライブラリ・ネットリスト）</p><p>データはこの端末のブラウザ内（IndexedDB）に保存されます。端末変更やブラウザのデータ削除に備えて、JSON書き出しでバックアップしてください。</p>`,
+      ask('Pocket EDA', `<p>${NATIVE ? 'Androidアプリ版 ' : ''}バージョン ${APP_VERSION}（第3段階: 部品ライブラリ・ネットリスト）</p><p>データはこの端末のブラウザ内（IndexedDB）に保存されます。端末変更やブラウザのデータ削除に備えて、JSON書き出しでバックアップしてください。</p>`,
         [{ label: '閉じる', value: '' }]);
     }
   });
@@ -624,7 +641,8 @@ async function boot() {
   else await newProject('はじめてのプロジェクト');
   if (recovered) toast('前回保存しきれなかった変更を復元しました');
 
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // Android アプリ版はファイルを内蔵しているので Service Worker は不要
+  if ('serviceWorker' in navigator && location.protocol !== 'file:' && !NATIVE) {
     navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('SW登録失敗', e));
   }
   document.documentElement.dataset.ready = '1';
