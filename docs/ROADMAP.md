@@ -78,7 +78,7 @@ index.html ── js/app.js（起動・UIシェル）
 | **5** ✅ | ERC・DRC | ERC 14項目・DRC 18項目。結果に検査した項目・未検査の項目を表示。回路A〜の正常系でエラー0、意図的な誤りを検出（単体＋E2E） |
 | **6** ✅ | Gerber・Excellon | RS-274X（X2属性）・Excellon・ZIP、ベタの塗りつぶし。tracespace（pcb-stackup）と pcb-tools（Python）で独立検証（KiCad GerbView は環境に無く未実施） |
 | **7** ✅ | BOM・CPL | JLCPCB形式（列は JLCPCB ヘルプの指定どおり）。座標を Gerber と照合、回転は Fabrication Toolkit の補正表と規則に合わせ、部品ごとに手動補正可 |
-| 8 | Android実機テスト | Pixel等で操作性改善、テストプロジェクトA〜Eを通しで実施 |
+| **8** 🔶 | Android実機テスト | エミュレータ（Android 11/14/15）で APK の自動試験とテストA〜Eの通しを実施済み。実機での操作性の確認は docs/DEVICE_TEST.md の手順で利用者が実施 |
 
 ## 5. 既知のリスク
 
