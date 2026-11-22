@@ -184,6 +184,7 @@ button { font: inherit; color: inherit; }
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--tool-h) + var(--safe-b) + 14px); transform: translateX(-50%); z-index: 20;
   background: var(--bg3); border: 1px solid var(--line); padding: 10px 14px; border-radius: 10px; max-width: 90vw; font-size: 14px;
+  pointer-events: none; /* 表示中もキャンバスへのタップを妨げない */
 }
 .toast.error { border-color: var(--err); color: #ffd0cd; }
 

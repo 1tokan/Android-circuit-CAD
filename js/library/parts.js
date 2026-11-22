@@ -186,29 +186,54 @@ export function unitPrice(part, qty = 1) {
 
 // ---- 分類・パッケージからの推定（CSV取込用） ----
 
-/** カテゴリ・説明からシンボル種別を推定 */
+/**
+ * カテゴリ・説明からシンボル種別を推定。
+ * ICの説明文には「USB」「switch」「controlled」など他の部品と紛らわしい語が多いので、
+ * 1) IC・オペアンプに特有の語を先に確認し、2) 単語単位（前後が英字でない）で照合する。
+ */
 export function guessKind(text) {
-  const t = String(text || '').toLowerCase();
-  const rules = [
-    [/potentiometer|trimmer|variable resistor|可変抵抗|半固定/, 'pot'],
-    [/aluminum electrolytic|electrolytic|tantalum|電解/, 'electrolytic'],
-    [/zener/, 'zener'],
-    [/light emitting|led(?!\s*driver)|発光ダイオード/, 'led'],
-    [/diode|rectifier|schottky|tvs|ダイオード/, 'diode'],
-    [/p-?channel.*(mosfet|mos)|(mosfet|mos).*p-?channel|pch/, 'pmos'],
-    [/mosfet|mos tube|field effect/, 'nmos'],
-    [/\bpnp\b/, 'pnp'],
-    [/bipolar|bjt|transistor|triode|トランジスタ/, 'npn'],
-    [/operational amplifier|op amp|opamp|comparator|オペアンプ/, 'opamp'],
-    [/inductor|choke|ferrite|インダクタ/, 'inductor'],
-    [/capacitor|mlcc|コンデンサ/, 'capacitor'],
-    [/resistor|抵抗/, 'resistor'],
-    [/switch|スイッチ/, 'switch'],
-    [/connector|header|terminal|usb|socket|コネクタ/, 'connector'],
-    [/battery|電池/, 'battery'],
-  ];
-  for (const [re, k] of rules) if (re.test(t)) return k;
+  const t = ` ${String(text || '').normalize('NFKC').toLowerCase()} `;
+  const w = (re) => new RegExp(`(?<![a-z])(?:${re})(?![a-z])`).test(t);
+  // 1) オペアンプ・コンパレータ
+  if (w('operational amplifiers?|op[- ]?amps?|opamps?|comparators?') || /オペアンプ|コンパレータ/.test(t)) return 'opamp';
+  // 2) IC に特有の語（これらがあれば、他の語があってもIC）
+  if (w('microcontrollers?|mcus?|socs?|system on chip|bluetooth|wi-?fi|wireless|transceivers?|regulators?|ldo|dc-dc|converters?|controllers?|drivers?|interface|uart|i2c|i2s|spi|can bus|ethernet|phy|sensors?|memory|flash|eeprom|sram|dram|adc|dac|codec|logic|gates?|flip[- ]?flops?|shift registers?|multiplexers?|demultiplexers?|buffers?|timers?|oscillators?|rtc|real[- ]time clock|charger|battery management|power management|pmic|load switch|power switch|power distribution switch|supervisor|reset ic|voltage reference|references?|audio amplifiers?|amplifiers? ic|mems|microphones?|modules?|optocouplers?|photocouplers?|isolators?|level shifters?|translators?|watchdog')
+    || /マイコン|レギュレータ|センサ|メモリ|ドライバ|変換|モジュール|集積回路/.test(t)) {
+    // 例外: 単体のダイオード・トランジスタのカテゴリ名に「driver」等が含まれることはまずないが、LEDドライバはIC
+    return 'ic';
+  }
+  // 3) 個別部品（単語単位）
+  if (w('potentiometers?|trimmers?|variable resistors?|trimpots?') || /可変抵抗|半固定/.test(t)) return 'pot';
+  if (w('aluminum electrolytic|electrolytic|tantalum|polymer capacitors?') || /電解/.test(t)) return 'electrolytic';
+  if (w('zener')) return 'zener';
+  if (w('light emitting diodes?|leds?') || /発光ダイオード/.test(t)) return 'led';
+  if (w('diodes?|rectifiers?|schottky|tvs|esd protection') || /ダイオード/.test(t)) return 'diode';
+  if (w('p-?channel|pch') && w('mosfets?|mos')) return 'pmos';
+  if (w('mosfets?|mos tubes?|field effect')) return 'nmos';
+  if (w('pnp')) return 'pnp';
+  if (w('bipolar|bjts?|npn|transistors?|triodes?') || /トランジスタ/.test(t)) return 'npn';
+  if (w('inductors?|chokes?|ferrite beads?|ferrites?') || /インダクタ/.test(t)) return 'inductor';
+  if (w('capacitors?|mlcc') || /コンデンサ/.test(t)) return 'capacitor';
+  if (w('resistors?|chip resistor') || /抵抗/.test(t)) return 'resistor';
+  if (w('tactile|push ?buttons?|slide switch(?:es)?|toggle switch(?:es)?|dip switch(?:es)?|switches|switch') || /スイッチ/.test(t)) return 'switch';
+  if (w('connectors?|headers?|receptacles?|terminals?|terminal blocks?|sockets?|plugs?|usb type-?c|usb connectors?') || /コネクタ/.test(t)) return 'connector';
+  if (w('batter(?:y|ies)|battery holders?') || /電池/.test(t)) return 'battery';
   return 'ic';
+}
+
+/**
+ * パッケージ名からピン（パッド）数を推定。分からなければ null。
+ * 例: SOIC-8 → 8、QFN-56-EP(7x7) → 57（露出パッドを含む）、SOT-223 → 4（タブを含む）、SOT-23-5 → 5
+ */
+export function pinCountFromPackage(pkg) {
+  const p = String(pkg || '').toUpperCase().replace(/\s/g, '');
+  if (/^SOT-?223/.test(p)) return 4;
+  if (/^SOT-?89/.test(p)) return 3;
+  if (/^(TO-?252|DPAK|TO-?263|D2PAK)$/.test(p)) return 3;
+  const m = p.match(/^(?:H?TSSOP|SSOP|MSOP|E?SOP|SOIC|PDIP|DIP|[TVWU]?QFN|[TVWU]?DFN|LQFP|TQFP|QFP|LGA|BGA|SOT-?23|SOT-?363|SC-?70|SC-?88|[VW]?SON|USON)-?(\d{1,3})/);
+  if (m) return Number(m[1]) + (/-EP|EP\(|PAD/.test(p) ? 1 : 0);
+  if (/^SOT-?23$/.test(p)) return 3;
+  return null;
 }
 
 /** パッケージ名と種別からフットプリントIDを推定（見つからなければ ''） */

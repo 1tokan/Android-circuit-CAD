@@ -13,10 +13,11 @@ import { createLibrary } from './library/library.js';
 import { createPartsView } from './library/view.js';
 import { createJlcsearch } from './library/jlcsearch.js';
 import { displayValue } from './library/parts.js';
+import { getFootprint } from './library/footprints.js';
 import { generateNetlist, netlistStatus, formatNetlistText } from './netlist/netlist.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 
 const state = {
   project: null,
@@ -605,7 +606,8 @@ async function boot() {
       switchWorkspace('schematic');
       state.editor.setPlacePart(part);
       renderToolbar();
-      toast(`${part.name}: キャンバスをタップして配置`);
+      if (!getFootprint(part.footprint)) toast(`${part.name}: フットプリント未設定です（部品画面の「編集」で設定するまでネットリストはエラー）。キャンバスをタップして配置`, true);
+      else toast(`${part.name}: キャンバスをタップして配置`);
     },
     onAssign: (part) => {
       const t = state.assign;

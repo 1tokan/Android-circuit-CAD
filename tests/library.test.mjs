@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { listFootprints, getFootprint, padNumbers, normalizeFootprint } from '../js/library/footprints.js';
 import {
   BUILTIN_PARTS, normalizePart, partSymbol, effectivePinMap, checkPinMap, searchParts, normalizeValue,
-  guessKind, guessFootprint, unitPrice, lcscUrl, PartFormatError,
+  guessKind, guessFootprint, unitPrice, lcscUrl, PartFormatError, pinCountFromPackage,
 } from '../js/library/parts.js';
 import { parseCSV, importCSV, importJSON, exportLibraryJSON, parsePrice, valueFromDescription } from '../js/library/importer.js';
 import { generateNetlist, netlistStatus, formatNetlistText, sourceHash } from '../js/netlist/netlist.js';
@@ -118,6 +118,38 @@ test('値の表記ゆれ吸収と検索', () => {
   assert.equal(searchParts(BUILTIN_PARTS, 'ao3400').items[0].mpn, 'AO3400A');
   assert.ok(searchParts(BUILTIN_PARTS, '', { jlcType: 'basic' }).items.every((p) => p.jlc.type === 'basic'));
   assert.equal(searchParts(BUILTIN_PARTS, 'zzzz').total, 0);
+});
+
+test('ICの説明文を他の部品と取り違えない（USB・switch・controlled など）', () => {
+  const cases = {
+    'SOIC-8 Operational Amplifier ROHS': 'opamp',
+    '2.4GHz 21dBm 340mA 3V~3.6V 88mA SPI、USB、UART': 'ic',
+    'USB to UART converter SOP-16 USB Converters ROHS': 'ic',
+    'Current limited power switch SOIC-8 Power Distribution Switches': 'ic',
+    'Charge controlled Li-ion battery charger IC ESOP-8': 'ic',
+    'Bluetooth、WiFi DMA': 'ic',
+    'USB Type-C Receptacle 16P Connectors': 'connector',
+    'Tactile Switches 6x6': 'switch',
+    '0603 Red Light Emitting Diodes (LED)': 'led',
+    'Zener Diodes 5.1V': 'zener',
+    'PNP Bipolar Transistors SOT-23': 'pnp',
+    'P-Channel MOSFET -30V SOT-23': 'pmos',
+  };
+  for (const [d, k] of Object.entries(cases)) assert.equal(guessKind(d), k, d);
+});
+
+test('パッケージ名からピン数（露出パッド・タブを含む）', () => {
+  const cases = { 'SOIC-8': 8, 'QFN-56-EP(7x7)': 57, 'QFN-56(7x7)': 56, 'SOT-223': 4, 'SOT-23-5': 5, 'SOT-23': 3, 'TSSOP-20': 20, 'LQFP-48(7x7)': 48, '0603': null, '5050': null };
+  for (const [p, n] of Object.entries(cases)) assert.equal(pinCountFromPackage(p), n, p);
+});
+
+test('汎用ICシンボルは奇数ピンも作れて、番号は反時計回り', () => {
+  const sym = partSymbol(normalizePart({ name: 'x', kind: 'ic', symbol: { kind: 'ic', pinCount: 57 } }));
+  assert.equal(sym.pins.length, 57);
+  const pin = (n) => sym.pins.find((p) => p.num === String(n));
+  assert.ok(pin(1).x < 0 && pin(29).x < 0 && pin(30).x > 0 && pin(57).x > 0);
+  assert.equal(pin(1).y, pin(57).y, '1番と57番が同じ高さ（左上と右上）');
+  assert.ok(pin(29).y > pin(1).y);
 });
 
 test('種別・フットプリントの推定', () => {

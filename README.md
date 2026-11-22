@@ -81,11 +81,11 @@ Androidで動く電子回路・PCB設計CAD（PWA）。最終目標は、LCSCの
 ## テスト
 
 ```bash
-npm test                               # 単体テスト（56件: データモデル・自動保存・表示変換・接続計算・編集操作・履歴・フットプリント・部品・取込・ネットリスト）
+npm test                               # 単体テスト（60件: データモデル・自動保存・表示変換・接続計算・編集操作・履歴・フットプリント・部品・取込・ネットリスト）
 python3 -m http.server 8765 &          # 別ターミナルでも可
 node tests/e2e.mjs                     # 保存まわりの実ブラウザテスト（16件）
 node tests/e2e-schematic.mjs           # 回路図エディタの実ブラウザテスト（24件、タッチ操作とマウス操作）
-node tests/e2e-library.mjs             # 部品ライブラリ・取込・ネットリスト・オンライン検索の実ブラウザテスト（20件、通信はテスト内で差し替え）
+node tests/e2e-library.mjs             # 部品ライブラリ・取込・ネットリスト・オンライン検索の実ブラウザテスト（21件、通信はテスト内で差し替え）
 ```
 
 E2EはPlaywrightを使います（`npm i -D playwright`。スクリプト冒頭の import パスと `executablePath` は環境に合わせて変更してください）。

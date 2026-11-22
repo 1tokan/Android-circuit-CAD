@@ -77,6 +77,10 @@ export function createPartsView(ctx) {
     return `<span class="badge jlc-${t}">${esc(JLC_TYPES[t])}</span>`;
   }
 
+  function fpBadge(p) {
+    return getFootprint(p.footprint) ? '' : '<span class="badge planned">フットプリント未設定</span>';
+  }
+
   function lcscBadge(p) {
     if (!p.lcsc) return '<span class="badge planned">LCSCなし</span>';
     return `<span class="badge ${p.lcscVerified ? 'ready' : 'planned'}">${esc(p.lcsc)}${p.lcscVerified ? '' : ' 要確認'}</span>`;
@@ -90,7 +94,7 @@ export function createPartsView(ctx) {
       <li class="pv-item" data-id="${esc(p.id)}">
         <div class="pv-row1"><b>${esc(p.name)}</b>${p.source === 'builtin' ? '<span class="badge">内蔵</span>' : ''}</div>
         <div class="pv-row2">${esc([p.manufacturer, p.mpn].filter(Boolean).join(' · ') || kindInfo(p.kind).label)}</div>
-        <div class="pv-row3">${lcscBadge(p)} ${badge(p)} <span>${esc(p.package || '-')}</span>
+        <div class="pv-row3">${lcscBadge(p)} ${badge(p)} <span>${esc(p.package || '-')}</span>${p.kind === 'ic' ? `<span>${partSymbol(p).pins.length}ピン</span>` : ''}${fpBadge(p)}
           ${priceText(p) ? `<span>${priceText(p)}</span>` : ''}${p.stock !== null ? `<span>在庫 ${p.stock.toLocaleString()}</span>` : ''}
           ${p.datasheet ? `<a href="${esc(p.datasheet)}" target="_blank" rel="noopener">データシート</a>` : ''}</div>
       </li>`).join('') + (r.total > r.items.length ? `<li class="pv-more"><button type="button" class="btn" data-more>さらに表示（残り${r.total - r.items.length}件）</button></li>` : '')
@@ -284,7 +288,7 @@ export function createPartsView(ctx) {
       <li class="pv-item online" data-idx="${i}">
         <div class="pv-row1"><b>${esc(p.name)}</b>${ctx.lib.get(p.id) ? '<span class="badge ready">保存済み</span>' : ''}</div>
         <div class="pv-row2">${esc([p.manufacturer, p.mpn].filter(Boolean).join(' · ') || p.description)}</div>
-        <div class="pv-row3">${lcscBadge(p)} ${badge(p)} <span>${esc(p.package || '-')}</span>
+        <div class="pv-row3">${lcscBadge(p)} ${badge(p)} <span>${esc(p.package || '-')}</span>${p.kind === 'ic' ? `<span>${partSymbol(p).pins.length}ピン</span>` : ''}${fpBadge(p)}
           ${priceText(p) ? `<span>${priceText(p)}</span>` : ''}${p.stock !== null ? `<span>在庫 ${p.stock.toLocaleString()}</span>` : ''}</div>
       </li>`).join('')}</ul>`;
   }

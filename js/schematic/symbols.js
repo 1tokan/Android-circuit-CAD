@@ -140,24 +140,33 @@ function pinNameList(comp) {
   return String(comp?.props?.pinNames || '').split(',').map((s) => s.trim());
 }
 
-/** 汎用IC: 左に 1..n/2（上から）, 右に n..n/2+1（上から）。DIP/SOICの反時計回り番号 */
+/**
+ * 汎用IC: DIP/SOIC と同じ反時計回りの番号。
+ * 左に 1..L（上から）、右に n..L+1（上から）。L = ceil(n/2)。奇数ピン（露出パッド付きQFNなど）にも対応
+ */
 function boxIC(comp) {
-  const n = clampPinCount(comp?.props?.pinCount ?? 8, 2, 128, true);
-  const half = n / 2;
+  const n = clampPinCount(comp?.props?.pinCount ?? 8, 1, 256);
+  const left = Math.ceil(n / 2), right = n - left;
   const names = pinNameList(comp);
-  const top = -(half - 1);
+  const top = -(left - 1);
   const pins = [];
   const g = [];
   const width = 5 + Math.min(6, Math.ceil(Math.max(0, ...names.map((s) => s.length)) * 0.35));
-  for (let i = 0; i < half; i++) {
+  for (let i = 0; i < left; i++) {
     const y = top + i * 2;
     pins.push(pin(i + 1, names[i] || '', -width - 2, y, 'bidirectional'));
-    pins.push(pin(n - i, names[n - i - 1] || '', width + 2, y, 'bidirectional'));
-    g.push(L(-width - 2, y, -width, y), L(width, y, width + 2, y));
+    g.push(L(-width - 2, y, -width, y));
     if (names[i]) g.push(T(-width + 0.4, y + 0.35, names[i], 0.9, 'start'));
-    if (names[n - i - 1]) g.push(T(width - 0.4, y + 0.35, names[n - i - 1], 0.9, 'end'));
   }
-  const y0 = top - 1.5, y1 = top + (half - 1) * 2 + 1.5;
+  for (let j = 0; j < right; j++) {
+    const num = n - j;
+    const y = top + j * 2;
+    pins.push(pin(num, names[num - 1] || '', width + 2, y, 'bidirectional'));
+    g.push(L(width, y, width + 2, y));
+    if (names[num - 1]) g.push(T(width - 0.4, y + 0.35, names[num - 1], 0.9, 'end'));
+  }
+  pins.sort((a, b) => Number(a.num) - Number(b.num));
+  const y0 = top - 1.5, y1 = top + (left - 1) * 2 + 1.5;
   g.unshift(R(-width, y0, width, y1));
   return { graphics: g, bbox: { x0: -width - 2, y0, x1: width + 2, y1 }, pins, showPinNumbers: true };
 }

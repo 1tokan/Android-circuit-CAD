@@ -36,7 +36,8 @@ function fieldText(c, sym) {
   const r = xformRect(sym.bbox, c);
   const val = c.props?.value ?? '';
   const dnp = c.props?.dnp ? ' (DNP)' : '';
-  if (r.x1 - r.x0 >= r.y1 - r.y0) {
+  // ピン番号を描く部品（IC・コネクタ等）は側面がピンで埋まるので、常に上下に置く
+  if (sym.showPinNumbers || r.x1 - r.x0 >= r.y1 - r.y0) {
     const cx = (r.x0 + r.x1) / 2;
     return `<text class="ref" x="${cx}" y="${r.y0 - 0.5}" text-anchor="middle">${esc(c.ref)}${dnp}</text>` +
       `<text class="val" x="${cx}" y="${r.y1 + 1.5}" text-anchor="middle">${esc(val)}</text>`;

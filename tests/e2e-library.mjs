@@ -306,6 +306,32 @@ await step('オンライン検索: 詳細→「保存して回路図に配置」
   assert.equal(saved.datasheet, 'https://example.com/ams1117.pdf');
 });
 
+await step('オンライン検索: ESP32-S3 がICとして呼び出せる（57ピン・フットプリント未設定の表示）', async () => {
+  const ESP = { lcsc: 2913192, mfr: 'ESP32-S3', package: 'QFN-56-EP(7x7)', is_basic: false, is_preferred: false, description: '-40℃~+105℃ 2.4GHz 21dBm 340mA 3V~3.6V 88mA SPI、USB、UART', stock: 525, price: 2.8747 };
+  await page.unroute('https://jlcsearch.tscircuit.com/**');
+  await page.route('https://jlcsearch.tscircuit.com/**', (route) => route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ components: [ESP] }) }));
+  await ws('parts');
+  await page.locator('#pv-q').fill('ESP32-S3');
+  await page.locator('#pv-online-btn').click();
+  await page.waitForSelector('#pv-online-res .pv-item');
+  const t = await page.locator('#pv-online-res').textContent();
+  assert.match(t, /57ピン/);
+  assert.match(t, /フットプリント未設定/);
+  await page.locator('#pv-online-res .pv-item').first().click();
+  await page.waitForSelector('#dialog[open]');
+  assert.match(await page.locator('#dialog-body').textContent(), /IC（汎用）/);
+  await page.locator('#dialog-actions button[value="place"]').click();
+  await page.waitForSelector('#ws-nav button[data-ws="schematic"][aria-current="page"]');
+  assert.match(await page.locator('#toast').textContent(), /フットプリント未設定/);
+  await tapWorld(0, 30);
+  const c = (await sheet()).components.at(-1);
+  assert.equal(c.kind, 'ic');
+  assert.equal(c.props.pinCount, 57);
+  assert.equal(c.props.lcsc, 'C2913192');
+  assert.equal(await page.locator(`#content [data-key="c:${c.id}"] .pinnum`).count(), 57, '57本のピン番号が描かれる');
+  await page.screenshot({ path: `${OUT}/ic-esp32-phone.png` });
+});
+
 await step('オンライン検索: つながらないときはエラーと代替手段を表示（ローカル検索はそのまま）', async () => {
   await page.unroute('https://jlcsearch.tscircuit.com/**');
   await page.route('https://jlcsearch.tscircuit.com/**', (route) => route.abort('failed'));

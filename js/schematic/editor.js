@@ -436,7 +436,7 @@ export function createSchematicEditor(ctx) {
       x.props.lcsc = x.props.lcsc.toUpperCase();
       x.props.dnp = v('dnp').checked;
       if (x.kind === 'ic' || x.kind === 'connector') {
-        x.props.pinCount = x.kind === 'ic' ? clampPinCount(v('pinCount').value, 2, 128, true) : clampPinCount(v('pinCount').value, 1, 64);
+        x.props.pinCount = x.kind === 'ic' ? clampPinCount(v('pinCount').value, 1, 256) : clampPinCount(v('pinCount').value, 1, 64);
         x.props.pinNames = v('pinNames').value.trim();
       }
     }, '属性');
