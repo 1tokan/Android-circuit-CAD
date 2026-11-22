@@ -10,7 +10,6 @@ import {
 } from './model.js';
 import { computeConnectivity } from './connectivity.js';
 import { renderSheet, symbolPreviewSVG } from './render.js';
-import { attachGestures } from '../ui/viewport.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -467,22 +466,23 @@ export function createSchematicEditor(ctx) {
   }
 
   // ---------------- 初期化 ----------------
-  attachGestures(ctx.svg, ctx.vp, {
+  // ジェスチャーは app.js が1か所で登録し、作業中のエディタへ振り分ける
+  const gestures = {
     onChange: ctx.onViewChange,
     onTap, onLongPress, onDragStart, onDragMove, onDragEnd, onDragCancel,
     onHover: (p) => { if (st.tool !== 'select') { st.hover = p; render(); } },
-  });
-  ctx.svg.addEventListener('pointerleave', () => { if (st.hover) { st.hover = null; render(); } });
+  };
+  ctx.svg.addEventListener('pointerleave', () => { if (ctx.isActive() && st.hover) { st.hover = null; render(); } });
   // ダブルクリックで属性: マウス・ペンのみ（タッチの連続タップは複数選択の追加・解除と衝突するため。タッチは長押し）
   let lastPointerType = 'mouse';
   ctx.svg.addEventListener('pointerdown', (e) => { lastPointerType = e.pointerType; }, true);
   ctx.svg.addEventListener('dblclick', (e) => {
-    if (st.tool !== 'select' || st.multi || lastPointerType === 'touch') return;
+    if (!ctx.isActive() || st.tool !== 'select' || st.multi || lastPointerType === 'touch') return;
     const r = ctx.svg.getBoundingClientRect();
     const k = hitTest(sheet(), ctx.vp.screenToWorld(e.clientX - r.left, e.clientY - r.top), 12 / ctx.vp.scale);
     if (k) { setSel(new Set([k])); editProps(); }
   });
-  $('#ctxbar').addEventListener('click', (e) => { const a = e.target.closest('[data-ctx]')?.dataset.ctx; if (a) onCtx(a); });
+  $('#ctxbar').addEventListener('click', (e) => { if (!ctx.isActive()) return; const a = e.target.closest('[data-ctx]')?.dataset.ctx; if (a) onCtx(a); });
   $('#picker-close').addEventListener('click', closePicker);
   document.addEventListener('keydown', onKey);
 
@@ -516,6 +516,8 @@ export function createSchematicEditor(ctx) {
 
   return {
     state: st,
+    gestures,
+    vp: ctx.vp,
     render,
     setPlacePart,
     assignPart,

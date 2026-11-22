@@ -1,0 +1,93 @@
+// PCB の SVG 描画（単位 mm）
+import { toMm, fpToBoard, boardRect } from './model.js';
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const mm = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
+
+function padShape(p, cls) {
+  const rx = p.shape === 'circle' || p.shape === 'oval' ? Math.min(p.w, p.h) / 2 : p.shape === 'roundrect' ? Math.min(p.w, p.h) * 0.25 : 0;
+  return `<rect class="${cls}" x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="${rx}"/>`;
+}
+
+function fpTransform(f) {
+  return `translate(${toMm(f.x)} ${toMm(f.y)}) rotate(${f.rot || 0})${f.side === 'bottom' ? ' scale(-1 1)' : ''}`;
+}
+
+/** フットプリント1個（指定した面の要素だけ） */
+function footprintLayer(f, layer, selected) {
+  const side = f.side === 'bottom' ? 'B' : 'F';
+  const out = [];
+  if (layer === 'Cu') {
+    for (const p of f.fpDef.pads) {
+      const cls = p.type === 'tht' ? 'pad tht' : `pad ${side === 'F' ? 'fcu' : 'bcu'}`;
+      out.push(padShape(p, cls));
+      if (p.type === 'tht') out.push(`<circle class="drill" cx="${p.x}" cy="${p.y}" r="${p.drill / 2}"/>`);
+    }
+  } else if (layer === 'Silk') {
+    const b = f.fpDef.body || { w: 1, h: 1 };
+    out.push(`<rect class="silk" x="${-b.w / 2}" y="${-b.h / 2}" width="${b.w}" height="${b.h}"/>`);
+    const p1 = f.fpDef.pads.find((p) => p.num === '1');
+    if (p1 && f.fpDef.pads.length > 2) out.push(`<circle class="silk-dot" cx="${p1.x - Math.sign(p1.x || -1) * (p1.w / 2 + 0.4)}" cy="${p1.y}" r="0.2"/>`);
+  }
+  return `<g class="fp ${side === 'B' ? 'bottom' : 'top'}${selected ? ' sel' : ''}" transform="${fpTransform(f)}">${out.join('')}</g>`;
+}
+
+/**
+ * @param opt { selection:Set, conn, activeLayer, show:{ratsnest, fcu, bcu, silk}, preview:{route:[pts], layer, width, rect:{a,b}, cursor} }
+ */
+export function renderPcb(pcb, { selection = new Set(), conn = null, activeLayer = 'F.Cu', show = {}, preview = {} } = {}) {
+  const S = { ratsnest: true, fcu: true, bcu: true, silk: true, ...show };
+  const out = [];
+  const r = boardRect(pcb);
+  // 基板（背景と外形）
+  out.push(`<rect class="board" x="${r.x0}" y="${r.y0}" width="${r.x1 - r.x0}" height="${r.y1 - r.y0}"/>`);
+  const layerGroup = (cu, isActive) => {
+    const g = [];
+    for (const z of pcb.zones.filter((z) => z.layer === cu)) {
+      g.push(`<polygon class="zone ${cu === 'F.Cu' ? 'fcu' : 'bcu'}${selection.has(`z:${z.id}`) ? ' sel' : ''}" points="${z.polygon.map((q) => `${toMm(q.x)},${toMm(q.y)}`).join(' ')}"/>`);
+    }
+    for (const t of pcb.tracks.filter((t) => t.layer === cu)) {
+      const a = mm(t.a), b = mm(t.b);
+      g.push(`<line class="track ${cu === 'F.Cu' ? 'fcu' : 'bcu'}${selection.has(`t:${t.id}`) ? ' sel' : ''}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke-width="${toMm(t.width)}"/>`);
+    }
+    return `<g class="cu-layer${isActive ? ' active' : ''}">${g.join('')}</g>`;
+  };
+  // 作業層を上に描く
+  const order = activeLayer === 'B.Cu' ? ['F.Cu', 'B.Cu'] : ['B.Cu', 'F.Cu'];
+  for (const cu of order) if ((cu === 'F.Cu' && S.fcu) || (cu === 'B.Cu' && S.bcu)) out.push(layerGroup(cu, cu === activeLayer));
+  // パッド（面の違うものを先に）
+  const fps = [...pcb.footprints].sort((a, b) => ((a.side === 'bottom') === (activeLayer === 'B.Cu') ? 1 : 0) - ((b.side === 'bottom') === (activeLayer === 'B.Cu') ? 1 : 0));
+  out.push('<g class="pads">' + fps.map((f) => footprintLayer(f, 'Cu', selection.has(`f:${f.id}`))).join('') + '</g>');
+  // ビア・穴
+  out.push('<g class="vias">' + pcb.vias.map((v) => `<circle class="via${selection.has(`v:${v.id}`) ? ' sel' : ''}" cx="${toMm(v.x)}" cy="${toMm(v.y)}" r="${toMm(v.diameter) / 2}"/><circle class="drill" cx="${toMm(v.x)}" cy="${toMm(v.y)}" r="${toMm(v.drill) / 2}"/>`).join('') + '</g>');
+  out.push('<g class="holes">' + pcb.holes.map((h) => `<circle class="hole${selection.has(`h:${h.id}`) ? ' sel' : ''}" cx="${toMm(h.x)}" cy="${toMm(h.y)}" r="${toMm(h.drill) / 2}"/>`).join('') + '</g>');
+  // シルク
+  if (S.silk) {
+    out.push('<g class="silk-layer">' + fps.map((f) => footprintLayer(f, 'Silk', selection.has(`f:${f.id}`))).join(''));
+    for (const f of pcb.footprints) {
+      const c = f.fpDef.courtyard;
+      const top = fpToBoard({ ...f, rot: 0 }, 0, c.y0 - 0.3);
+      out.push(`<text class="refdes ${f.side === 'bottom' ? 'bottom' : ''}${selection.has(`f:${f.id}`) ? ' sel' : ''}" x="${toMm(f.x)}" y="${Math.min(top.y, toMm(f.y) - 0.3)}" font-size="0.9">${esc(f.ref)}</text>`);
+    }
+    for (const t of pcb.texts) {
+      out.push(`<text class="silk-text ${t.layer === 'B.SilkS' ? 'bottom' : ''}${selection.has(`x:${t.id}`) ? ' sel' : ''}" x="${toMm(t.x)}" y="${toMm(t.y)}" font-size="${toMm(t.size)}" transform="rotate(${t.rot || 0} ${toMm(t.x)} ${toMm(t.y)})${t.layer === 'B.SilkS' ? ` translate(${2 * toMm(t.x)} 0) scale(-1 1)` : ''}" dominant-baseline="central">${esc(t.text)}</text>`);
+    }
+    out.push('</g>');
+  }
+  out.push(`<rect class="edge" x="${r.x0}" y="${r.y0}" width="${r.x1 - r.x0}" height="${r.y1 - r.y0}"/>`);
+  // ラッツネスト
+  if (S.ratsnest && conn) {
+    out.push('<g class="ratsnest">' + conn.ratsnest.map((l) => `<line x1="${l.a.x}" y1="${l.a.y}" x2="${l.b.x}" y2="${l.b.y}"/>`).join('') + '</g>');
+  }
+  // プレビュー
+  if (preview.route && preview.route.length > 1) {
+    out.push(`<polyline class="route-preview ${preview.layer === 'B.Cu' ? 'bcu' : 'fcu'}" points="${preview.route.map((p) => `${p.x},${p.y}`).join(' ')}" stroke-width="${preview.width}"/>`);
+  }
+  if (preview.routeStart) out.push(`<circle class="route-start" cx="${preview.routeStart.x}" cy="${preview.routeStart.y}" r="0.25"/>`);
+  if (preview.rect) {
+    const { a, b } = preview.rect;
+    out.push(`<rect class="box-select" x="${Math.min(a.x, b.x)}" y="${Math.min(a.y, b.y)}" width="${Math.abs(b.x - a.x)}" height="${Math.abs(b.y - a.y)}"/>`);
+  }
+  if (preview.cursor) out.push(`<path class="cursor" d="M${preview.cursor.x - 0.6} ${preview.cursor.y}h1.2M${preview.cursor.x} ${preview.cursor.y - 0.6}v1.2"/>`);
+  return out.join('');
+}

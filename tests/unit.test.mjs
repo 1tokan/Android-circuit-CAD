@@ -130,8 +130,8 @@ test('Viewport: 倍率は上下限内', () => {
 
 test('未実装モジュールは ready と表示されない', () => {
   const ready = MODULES.filter((m) => m.status === 'ready').map((m) => m.id);
-  assert.deepEqual(ready, ['project', 'schematic', 'library', 'lcsc', 'netlist'], '第3段階までのモジュールのみ ready');
-  const expect = { schematic: 'ready', parts: 'ready', pcb: 'planned', check: 'planned', output: 'planned' };
+  assert.deepEqual(ready, ['project', 'schematic', 'library', 'lcsc', 'netlist', 'pcb'], '第4段階までのモジュールのみ ready');
+  const expect = { schematic: 'ready', parts: 'ready', pcb: 'ready', check: 'planned', output: 'planned' };
   for (const ws of WORKSPACES) assert.equal(workspaceStatus(ws), expect[ws.id], ws.id);
 });
 

@@ -80,7 +80,7 @@ export function generateNetlist(project, { now = new Date().toISOString() } = {}
       return { num: p.num, name: p.name, type: p.type, pads, net: pinNet.get(`${c.id}:${p.num}`) || null, nc: pm.nc.has(p.num) };
     });
     components.push({
-      ref: c.ref, kind: c.kind, value: c.props?.value ?? '',
+      ref: c.ref, compId: c.id, kind: c.kind, value: c.props?.value ?? '',
       footprint: fp?.id || null, footprintVerified: !!fp?.verified, footprintGenerated: !!fp?.generated,
       lcsc: part?.lcsc || c.props?.lcsc || '', mpn: part?.mpn || c.props?.mpn || '', manufacturer: part?.manufacturer || c.props?.manufacturer || '',
       partId: part?.id || null, dnp: !!c.props?.dnp, pins,

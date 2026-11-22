@@ -46,11 +46,13 @@ function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
  *  - 2本目の指が触れたら1本指の操作をキャンセル(onDragCancel)してピンチズームに切替（誤操作防止）
  *  - マウスのボタンなし移動 → onHover
  */
-export function attachGestures(el, vp, h = {}) {
-  const H = {
-    onChange: () => {}, onTap: () => {}, onDragStart: () => false, onDragMove: () => {},
-    onDragEnd: () => {}, onDragCancel: () => {}, onLongPress: () => {}, onHover: () => {}, ...h,
-  };
+export function attachGestures(el, vpOrGetter, h = {}) {
+  // vp と処理は呼び出しのたびに解決する（作業領域ごとに別の表示・別のエディタへ振り分けるため）
+  const vpGet = typeof vpOrGetter === 'function' ? vpOrGetter : () => vpOrGetter;
+  const noop = () => {};
+  const call = (name, ...a) => (typeof h[name] === 'function' ? h[name](...a) : (name === 'onDragStart' ? false : noop()));
+  const H = new Proxy({}, { get: (_, name) => (...a) => call(name, ...a) });
+  let vp = vpGet();
   const tapSlop = h.tapSlop ?? 8;
   const pts = new Map();
   let mode = 'idle'; // idle | maybeTap | longPressed | pan | drag | pinch | pinchEnding
@@ -65,6 +67,7 @@ export function attachGestures(el, vp, h = {}) {
   const clearLP = () => { clearTimeout(lpTimer); lpTimer = null; };
 
   el.addEventListener('pointerdown', (e) => {
+    vp = vpGet();
     el.setPointerCapture?.(e.pointerId);
     const p = local(e);
     pts.set(e.pointerId, p);
@@ -89,6 +92,7 @@ export function attachGestures(el, vp, h = {}) {
 
   el.addEventListener('pointermove', (e) => {
     if (!pts.has(e.pointerId)) {
+      vp = vpGet();
       if (e.pointerType === 'mouse' && e.buttons === 0) H.onHover(world(local(e)), info(e));
       return;
     }
@@ -134,6 +138,7 @@ export function attachGestures(el, vp, h = {}) {
 
   el.addEventListener('wheel', (e) => {
     e.preventDefault();
+    vp = vpGet();
     const p = local(e);
     vp.zoomAt(p.x, p.y, Math.exp(-e.deltaY * 0.0015));
     H.onChange();

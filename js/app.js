@@ -6,7 +6,9 @@ import * as store from './core/storage.js';
 import { AutoSaver } from './core/autosave.js';
 import { bus } from './core/events.js';
 import { MODULES, WORKSPACES, TOOLS, workspaceStatus } from './modules/registry.js';
-import { Viewport } from './ui/viewport.js';
+import { Viewport, attachGestures } from './ui/viewport.js';
+import { createPcbEditor } from './pcb/editor.js';
+import { ensurePcb, boardRect, toMm } from './pcb/model.js';
 import { History } from './core/history.js';
 import { createSchematicEditor } from './schematic/editor.js';
 import { createLibrary } from './library/library.js';
@@ -17,7 +19,7 @@ import { getFootprint } from './library/footprints.js';
 import { generateNetlist, netlistStatus, formatNetlistText } from './netlist/netlist.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.3.5';
+const APP_VERSION = '0.4.0';
 
 const state = {
   project: null,
@@ -26,6 +28,9 @@ const state = {
   saver: null,
   history: null,
   editor: null,
+  pcbVp: new Viewport({ scale: 12 }),
+  pcbHistory: null,
+  pcbEditor: null,
   lib: createLibrary(),
   online: createJlcsearch(),
   partsView: null,
@@ -102,34 +107,47 @@ function editSchematic(fn, label) {
   return changed;
 }
 
-function undo() {
-  const l = state.history.undo();
-  if (l === null) return;
-  mutateProject(() => {}, 'undo');
-  state.editor.state.sel = new Set();
-  state.editor.render();
-  renderSidePanel();
-  toast(`元に戻す: ${l}`);
+/** 作業中の画面のエディタと履歴 */
+function activeEditor() { return state.workspace === 'pcb' ? state.pcbEditor : state.workspace === 'schematic' ? state.editor : null; }
+function activeHistory() { return state.workspace === 'pcb' ? state.pcbHistory : state.workspace === 'schematic' ? state.history : null; }
+function activeVp() { return state.workspace === 'pcb' ? state.pcbVp : state.vp; }
+
+/** PCB の編集（PCB用の元に戻す履歴に積む） */
+function editPcb(fn, label) {
+  let result;
+  const changed = state.pcbHistory.record(() => { result = fn(); }, label);
+  if (changed) { mutateProject(() => {}, label); renderSidePanel(); }
+  return result === undefined ? changed : result;
 }
-function redo() {
-  const l = state.history.redo();
+
+function undoRedo(kind) {
+  const h = activeHistory(), ed = activeEditor();
+  if (!h) return;
+  const l = kind === 'undo' ? h.undo() : h.redo();
   if (l === null) return;
-  mutateProject(() => {}, 'redo');
-  state.editor.state.sel = new Set();
-  state.editor.render();
+  mutateProject(() => {}, kind);
+  ed.state.sel = new Set();
+  ed.render();
   renderSidePanel();
-  toast(`やり直す: ${l}`);
+  toast(`${kind === 'undo' ? '元に戻す' : 'やり直す'}: ${l}`);
 }
+function undo() { undoRedo('undo'); }
+function redo() { undoRedo('redo'); }
 function renderUndo() {
-  $('#btn-undo').disabled = !state.history?.canUndo();
-  $('#btn-redo').disabled = !state.history?.canRedo();
+  const h = activeHistory();
+  $('#btn-undo').disabled = !h?.canUndo();
+  $('#btn-redo').disabled = !h?.canRedo();
 }
 
 async function openProject(project) {
   if (state.project && state.saver.dirty) await state.saver.flush();
   state.project = project;
+  ensurePcb(project);
   state.history.clear();
+  state.pcbHistory.clear();
   state.editor.resetForProject();
+  state.pcbEditor.resetForProject();
+  fitPcb();
   state.saver.dirty = false;
   setSaveState('saved');
   await store.setSetting('lastProjectId', project.id);
@@ -181,7 +199,7 @@ function renderToolbar() {
     b.disabled = !enabled;
     b.title = enabled ? t.label : `${t.label}（未実装）`;
     b.dataset.tool = t.id;
-    if (enabled && state.workspace === 'schematic' && state.editor.state.tool === t.id) b.classList.add('on');
+    if (enabled && activeEditor()?.state.tool === t.id) b.classList.add('on');
     b.innerHTML = `<svg class="ico" viewBox="0 0 24 24"><path d="${t.icon || 'M5 5h14v14H5z'}"/></svg>${t.label}`;
     if (enabled) b.onclick = () => { onTool(t.id); };
     return b;
@@ -190,9 +208,23 @@ function renderToolbar() {
 
 function onTool(id) {
   if (state.workspace === 'parts') { state.partsView.action(id); return; }
-  if (state.workspace !== 'schematic') return;
-  state.editor.setTool(id);
+  const ed = activeEditor();
+  if (!ed) return;
+  ed.setTool(id);
   renderToolbar();
+}
+
+/** PCB の表示を基板と部品が全部入るように合わせる */
+function fitPcb() {
+  const svg = $('#canvas');
+  const { width, height } = svg.getBoundingClientRect();
+  if (!width || !state.project) return;
+  const pcb = ensurePcb(state.project);
+  const r = boardRect(pcb);
+  let x0 = r.x0, y0 = r.y0, x1 = r.x1, y1 = r.y1;
+  for (const f of pcb.footprints) { const x = toMm(f.x), y = toMm(f.y); x0 = Math.min(x0, x - 3); y0 = Math.min(y0, y - 3); x1 = Math.max(x1, x + 3); y1 = Math.max(y1, y + 3); }
+  state.pcbVp.fit({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, width, Math.max(100, height - 80), 16);
+  state.pcbVp.y -= 60 / state.pcbVp.scale; // 上部のチップ分ずらす
 }
 
 // ---------------- 部品ライブラリ連携 ----------------
@@ -245,6 +277,27 @@ async function download(name, text, type = 'text/plain') {
 }
 
 // ---------------- ネットリスト ----------------
+async function renderPcbSidePanel(el) {
+  const pcb = ensurePcb(state.project);
+  const conn = state.pcbEditor.connectivity();
+  const row = (k, v) => `<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`;
+  let html = `<h2>PCB</h2>` + row('基板サイズ', `${toMm(pcb.outline.w).toFixed(1)} × ${toMm(pcb.outline.h).toFixed(1)} mm`) +
+    row('部品', pcb.footprints.length) + row('配線', pcb.tracks.length) + row('ビア', pcb.vias.length) + row('ベタ', pcb.zones.length) +
+    row('未配線', conn.unrouted) + (conn.shorts.length ? `<p class="err">短絡の疑い: ${conn.shorts.map((s) => s.join('/')).map(esc).join('、')}</p>` : '');
+  const nls = netlistStatus(state.project);
+  if (pcb.footprints.length && (nls !== 'current' || pcb.netlistHash !== state.project.netlist?.sourceHash)) html += '<p class="warn">回路図が変わっています。ネットリストを再読込してください</p>';
+  const sel = state.pcbEditor.selectionInfo();
+  if (sel.length === 1 && sel[0].item) {
+    const { key, item } = sel[0];
+    if (key[0] === 'f') html += `<h2>選択中: ${esc(item.ref)}</h2>` + row('値', item.value) + row('フットプリント', item.fpDef.name) + row('位置', `${toMm(item.x).toFixed(2)}, ${toMm(item.y).toFixed(2)} mm`) + row('回転・面', `${item.rot}°・${item.side === 'bottom' ? '裏' : '表'}`);
+    else if (key[0] === 't') html += `<h2>配線</h2>` + row('ネット', item.net || '—') + row('幅', `${toMm(item.width)} mm`) + row('層', item.layer);
+    else if (key[0] === 'v') html += `<h2>ビア</h2>` + row('ネット', item.net || '—') + row('外径/穴', `${toMm(item.diameter)} / ${toMm(item.drill)} mm`);
+    html += `<button class="btn small-btn" id="btn-side-pprops">属性を編集</button>`;
+  } else if (sel.length) html += `<h2>${sel.length}個選択中</h2>`;
+  el.innerHTML = html;
+  $('#btn-side-pprops')?.addEventListener('click', () => state.pcbEditor.editProps());
+}
+
 async function showNetlist() {
   const nl = generateNetlist(state.project);
   mutateProject((p) => { p.netlist = nl; }, 'netlist');
@@ -267,8 +320,9 @@ function renderOverlay() {
   const mods = ws.modules.map((id) => MODULES.find((m) => m.id === id));
   const planned = mods.filter((m) => m.status === 'planned');
   const ov = $('#stage-overlay');
-  $('#ctxbar').hidden = state.workspace !== 'schematic';
+  $('#ctxbar').hidden = !activeEditor();
   $('#content').style.display = state.workspace === 'schematic' ? '' : 'none';
+  $('#pcb-content').style.display = state.workspace === 'pcb' ? '' : 'none';
   const pv = $('#parts-view');
   pv.hidden = state.workspace !== 'parts';
   document.querySelector('.zoom-ctl').hidden = state.workspace === 'parts';
@@ -293,6 +347,7 @@ function renderModuleStatus() {
 
 function renderSidePanel() {
   const el = $('#sel-info');
+  if (state.workspace === 'pcb' && state.pcbEditor && state.project) { renderPcbSidePanel(el); return; }
   if (!state.editor || state.workspace !== 'schematic') { el.innerHTML = ''; return; }
   const d = state.editor.selectionSummary();
   const sh = state.project.schematic.sheets[0];
@@ -316,7 +371,7 @@ function renderSidePanel() {
 function renderCanvas() {
   const svg = $('#canvas');
   const { width, height } = svg.getBoundingClientRect();
-  const vp = state.vp;
+  const vp = activeVp();
   $('#world').setAttribute('transform', `scale(${vp.scale}) translate(${-vp.x} ${-vp.y})`);
   // 見えている範囲だけグリッドを敷く
   const x0 = Math.floor(vp.x / 10) * 10, y0 = Math.floor(vp.y / 10) * 10;
@@ -327,8 +382,8 @@ function renderCanvas() {
   }
   // 拡大率が低いと点グリッドが密になりすぎるので隠す
   $('#grid-minor-rect').style.display = vp.scale < 4 ? 'none' : '';
-  $('#coords').textContent = `×${vp.scale.toFixed(1)}`;
-  state.editor?.render();
+  $('#coords').textContent = state.workspace === 'pcb' ? `${(vp.scale).toFixed(1)} px/mm` : `×${vp.scale.toFixed(1)}`;
+  activeEditor()?.render();
 }
 
 let rafPending = false;
@@ -536,7 +591,7 @@ function bindUI() {
     if (act === 'annotate') { state.editor.reannotate(); toast('部品番号を位置順に振り直しました'); }
     if (act === 'netlist') showNetlist();
     if (act === 'about') {
-      ask('Pocket EDA', `<p>${NATIVE ? 'Androidアプリ版 ' : ''}バージョン ${APP_VERSION}（第3段階: 部品ライブラリ・ネットリスト）</p><p>データはこの端末のブラウザ内（IndexedDB）に保存されます。端末変更やブラウザのデータ削除に備えて、JSON書き出しでバックアップしてください。</p>`,
+      ask('Pocket EDA', `<p>${NATIVE ? 'Androidアプリ版 ' : ''}バージョン ${APP_VERSION}（第4段階: PCBレイアウト）</p><p>データはこの端末のブラウザ内（IndexedDB）に保存されます。端末変更やブラウザのデータ削除に備えて、JSON書き出しでバックアップしてください。</p>`,
         [{ label: '閉じる', value: '' }]);
     }
   });
@@ -556,9 +611,13 @@ function bindUI() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
   });
-  $('#btn-zoom-in').onclick = () => { const r = svg.getBoundingClientRect(); state.vp.zoomAt(r.width / 2, r.height / 2, 1.25); renderCanvas(); };
-  $('#btn-zoom-out').onclick = () => { const r = svg.getBoundingClientRect(); state.vp.zoomAt(r.width / 2, r.height / 2, 0.8); renderCanvas(); };
-  $('#btn-zoom-fit').onclick = () => { centerOrigin(); renderCanvas(); };
+  $('#btn-zoom-in').onclick = () => { const r = svg.getBoundingClientRect(); activeVp().zoomAt(r.width / 2, r.height / 2, 1.25); renderCanvas(); };
+  $('#btn-zoom-out').onclick = () => { const r = svg.getBoundingClientRect(); activeVp().zoomAt(r.width / 2, r.height / 2, 0.8); renderCanvas(); };
+  $('#btn-zoom-fit').onclick = () => { if (state.workspace === 'pcb') fitPcb(); else centerOrigin(); renderCanvas(); };
+  // ジェスチャーは1か所で登録し、作業中の画面のエディタへ振り分ける
+  attachGestures(svg, () => activeVp(), new Proxy({}, {
+    get: (_, name) => (name === 'onChange' ? scheduleCanvas : activeEditor()?.gestures?.[name]),
+  }));
   new ResizeObserver(scheduleCanvas).observe(svg);
 
   // オンライン状態
@@ -592,6 +651,32 @@ async function boot() {
     onPartUsed: usePartInProject,
     getProjectPart: (id) => state.project.library.parts.find((p) => p.id === id) || state.lib.get(id),
     openLibrary: (target = null) => { state.assign = target; switchWorkspace('parts'); },
+  });
+  state.pcbHistory = new History(() => state.project.pcb, (s) => { state.project.pcb = s; });
+  state.pcbEditor = createPcbEditor({
+    svg: $('#canvas'),
+    content: $('#pcb-content'),
+    vp: state.pcbVp,
+    getProject: () => state.project,
+    edit: (fn, label) => editPcb(fn, label),
+    onViewChange: scheduleCanvas,
+    isActive: () => !!state.project && state.workspace === 'pcb',
+    onSelectionChange: () => renderSidePanel(),
+    onToolChange: () => renderToolbar(),
+    ui: { toast, ask, prompt: promptTextWithValue },
+    fitAll: () => { fitPcb(); renderCanvas(); },
+    // 回路図からネットリストを用意（古ければ作り直して保存）
+    getNetlist: async () => {
+      if (netlistStatus(state.project) !== 'current') {
+        const nl = generateNetlist(state.project);
+        mutateProject((p) => { p.netlist = nl; }, 'netlist');
+      }
+      return state.project.netlist;
+    },
+    resolveFp: (c) => {
+      const part = c.partId ? state.project.library.parts.find((p) => p.id === c.partId) : null;
+      return (part && partFootprint(part)) || getFootprint(c.footprint);
+    },
   });
   state.partsView = createPartsView({
     root: $('#parts-view'),
@@ -651,6 +736,6 @@ async function boot() {
 }
 
 // 開発・テスト用の操作口（コンソールから使える）
-window.pocketEDA = { state, mutateProject, editSchematic, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
+window.pocketEDA = { state, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
 
 boot();
