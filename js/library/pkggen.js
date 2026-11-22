@@ -83,14 +83,24 @@ function quad(n, bw, bh, pitch, kind, ep) {
   const pads = [];
   const span = (per - 1) * pitch;
   let len, wid, cx, cy;
-  if (kind === 'QFN') { len = 0.875; wid = r4(pitch * 0.5); cx = bw / 2 - 0.06; cy = bh / 2 - 0.06; }
-  else { len = 1.5; wid = r4(pitch * 0.55); cx = bw / 2 + 0.65; cy = bh / 2 + 0.65; }
+  if (kind === 'QFN') {
+    // 角で隣の辺のパッドと 0.2mm 以上離れるよう、内側への長さを制限する
+    wid = r4(pitch * 0.5);
+    const outer = Math.min(bw, bh) / 2 + 0.375;                 // パッド外端（本体より 0.375mm 外）
+    const innerMin = span / 2 + wid / 2 + 0.2;                   // 内端の下限
+    len = r4(Math.max(0.4, Math.min(0.875, outer - innerMin)));
+    cx = r4(bw / 2 + 0.375 - len / 2); cy = r4(bh / 2 + 0.375 - len / 2);
+  } else { len = 1.5; wid = r4(pitch * 0.55); cx = bw / 2 + 0.65; cy = bh / 2 + 0.65; }
   let k = 1;
   for (let i = 0; i < per; i++) pads.push(smd(k++, -cx, -span / 2 + i * pitch, len, wid));           // 左辺 上→下
   for (let i = 0; i < per; i++) pads.push(smd(k++, -span / 2 + i * pitch, cy, wid, len));            // 下辺 左→右
   for (let i = 0; i < per; i++) pads.push(smd(k++, cx, span / 2 - i * pitch, len, wid));             // 右辺 下→上
   for (let i = 0; i < per; i++) pads.push(smd(k++, span / 2 - i * pitch, -cy, wid, len));            // 上辺 右→左
-  if (ep) pads.push(smd(n + 1, 0, 0, r4(bw * 0.6), r4(bh * 0.6), 'rect'));
+  if (ep) {
+    // 露出パッドは周囲のパッドの内端から 0.25mm 以上離す
+    const ex = Math.min(bw * 0.6, 2 * (cx - len / 2 - 0.25)), ey = Math.min(bh * 0.6, 2 * (cy - len / 2 - 0.25));
+    if (ex > 0.3 && ey > 0.3) pads.push(smd(n + 1, 0, 0, r4(ex), r4(ey), 'rect'));
+  }
   return { pads, body: { w: bw, h: bh } };
 }
 
@@ -98,13 +108,15 @@ function quad(n, bw, bh, pitch, kind, ep) {
 function dfn(n, bw, bh, pitch, ep) {
   const half = n / 2;
   const y0 = -((half - 1) * pitch) / 2;
-  const x = bw / 2 - 0.2;
+  const len = r4(Math.min(0.7, bw * 0.3));
+  const x = r4(bw / 2 + 0.3 - len / 2);
   const pads = [];
   for (let i = 0; i < half; i++) {
-    pads.push(smd(i + 1, -x, y0 + i * pitch, 0.7, r4(pitch * 0.55)));
-    pads.push(smd(n - i, x, y0 + i * pitch, 0.7, r4(pitch * 0.55)));
+    pads.push(smd(i + 1, -x, y0 + i * pitch, len, r4(pitch * 0.55)));
+    pads.push(smd(n - i, x, y0 + i * pitch, len, r4(pitch * 0.55)));
   }
-  if (ep) pads.push(smd(n + 1, 0, 0, r4(bw * 0.45), r4(half * pitch * 0.85), 'rect'));
+  const ex = Math.min(bw * 0.45, 2 * (x - len / 2 - 0.25));
+  if (ep && ex > 0.3) pads.push(smd(n + 1, 0, 0, r4(ex), r4(half * pitch * 0.85), 'rect'));
   pads.sort((a, b) => Number(a.num) - Number(b.num));
   return { pads, body: { w: bw, h: bh } };
 }
@@ -215,7 +227,7 @@ export function generateFootprint(kind, pkg) {
       const bw = prm.bodyW, bh = prm.bodyH;
       if (/QFN|QFP/.test(fam) && !/DFN/.test(fam) && n % 4 === 0) {
         const isQFN = /QFN/.test(fam);
-        const pitch = prm.pitch ?? inferPitch(n / 4, Math.min(bw, bh), isQFN ? 1.2 : 1.0, isQFN ? [0.65, 0.5, 0.4] : [0.8, 0.65, 0.5, 0.4]);
+        const pitch = prm.pitch ?? inferPitch(n / 4, Math.min(bw, bh), isQFN ? 1.5 : 1.0, isQFN ? [0.65, 0.5, 0.4] : [0.8, 0.65, 0.5, 0.4]);
         g = quad(n, bw, bh, pitch, isQFN ? 'QFN' : 'QFP', isQFN && (prm.ep || true));
         desc = `${fam}-${n} ${bw}x${bh} P${pitch}${isQFN ? ' 露出パッド' : ''}`;
       } else if (/DFN/.test(fam) && n % 2 === 0) {

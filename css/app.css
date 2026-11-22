@@ -367,3 +367,36 @@ button { font: inherit; color: inherit; }
 #pcb-content .cursor { stroke: #ffd27a; stroke-width: 0.08; }
 .chip-info .err { color: var(--err); }
 .badge { white-space: nowrap; flex: 0 0 auto; align-self: flex-start; }
+
+/* ---- 検査（ERC/DRC） ---- */
+.check-view { padding: 12px; }
+.check-wrap { max-width: 860px; margin: 0 auto; }
+.check-wrap h3 { margin: 16px 0 8px; font-size: 15px; }
+.check-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px; }
+.check-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg2); cursor: pointer; }
+.check-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.check-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.check-card small { display: block; opacity: .85; line-height: 1.5; }
+.check-card-actions { display: flex; gap: 8px; margin-top: 8px; }
+.check-card-actions .btn { min-height: 40px; }
+.badge.err { background: #6b1f24; color: #ffd6d6; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.chips .chip { border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 16px; padding: 6px 12px; min-height: 36px; }
+.chips .chip.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.issues { list-style: none; margin: 0; padding: 0; }
+.issue { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.issue .lv { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.issue.error .lv { background: #c83a3a; color: #fff; }
+.issue.warning .lv { background: #c9a227; color: #000; }
+.issue .msg { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.check-wrap details { margin-top: 12px; }
+.check-wrap summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.cover, .uncovered { margin: 4px 0; padding-left: 0; list-style: none; font-size: 13px; }
+.cover li { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 6px; padding: 3px 0; }
+.uncovered li { padding: 3px 0 3px 14px; position: relative; opacity: .9; }
+.uncovered li::before { content: '—'; position: absolute; left: 0; }
+.rules { display: grid; gap: 6px; }
+.rule-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 24px; gap: 6px; align-items: center; font-size: 13px; }
+.rule-row input { width: 100%; }
+.check-marker circle, .check-marker path { fill: none; stroke: #ff3df0; }
+.check-marker { pointer-events: none; }

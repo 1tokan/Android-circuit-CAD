@@ -48,12 +48,11 @@ await step('スマホ縦画面: 上部・タブ・キャンバス・下部ツー
   await page.screenshot({ path: `${OUT}/phone-portrait.png` });
 });
 
-await step('未実装の作業領域(検査・出力)は「未実装」と表示し、ツールは無効', async () => {
-  await page.locator('#ws-nav button[data-ws="check"]').click();
+await step('未実装の作業領域(出力)は「未実装」と表示し、ツールは無効', async () => {
+  await page.locator('#ws-nav button[data-ws="output"]').click();
   assert.ok(await page.locator('#stage-overlay').isVisible());
   assert.match(await page.locator('#stage-overlay').textContent(), /未実装/);
   assert.equal(await page.locator('#toolbar .tool:not([disabled])').count(), 0);
-  await page.locator('#ws-nav button[data-ws="output"]').click();
   assert.match(await page.locator('#stage-overlay').textContent(), /Gerber/);
   assert.equal(await page.locator('#ws-nav button[aria-current="page"]').getAttribute('data-ws'), 'output');
   await page.locator('#ws-nav button[data-ws="schematic"]').click();

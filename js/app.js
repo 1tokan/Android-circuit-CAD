@@ -17,9 +17,12 @@ import { createJlcsearch } from './library/jlcsearch.js';
 import { displayValue, partFootprint } from './library/parts.js';
 import { getFootprint } from './library/footprints.js';
 import { generateNetlist, netlistStatus, formatNetlistText } from './netlist/netlist.js';
+import { createCheckView } from './check/view.js';
+import { ercStatus } from './check/erc.js';
+import { drcStatus } from './check/drc.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 
 const state = {
   project: null,
@@ -34,6 +37,8 @@ const state = {
   lib: createLibrary(),
   online: createJlcsearch(),
   partsView: null,
+  checkView: null,
+  marker: null, // 検査結果の「表示」で示す位置 {ws, x, y}
   assign: null, // 部品データの割り当て先 {key, ref}
 };
 
@@ -97,6 +102,7 @@ export function mutateProject(fn, reason = 'edit') {
   bus.emit('project:changed', { reason, revision: state.project.revision });
   renderHeader();
   renderUndo();
+  if (state.workspace === 'check' && state.checkView && !String(reason).startsWith('check:')) state.checkView.render();
 }
 
 /** 回路図の編集（元に戻す履歴に積む）。変化が無ければ保存もしない */
@@ -183,7 +189,7 @@ function renderNav() {
     const stLabel = st === 'planned' ? '未実装' : st === 'partial' ? '一部実装' : '';
     b.innerHTML = `<span>${ws.label}</span>${stLabel ? `<span class="badge ${st}">${stLabel}</span>` : ''}`;
     b.setAttribute('aria-label', stLabel ? `${ws.label}（${stLabel}）` : ws.label);
-    b.onclick = () => { state.workspace = ws.id; renderAll(); };
+    b.onclick = () => { state.workspace = ws.id; state.marker = null; renderAll(); };
     return b;
   }));
 }
@@ -208,6 +214,11 @@ function renderToolbar() {
 
 function onTool(id) {
   if (state.workspace === 'parts') { state.partsView.action(id); return; }
+  if (state.workspace === 'check') {
+    if (id === 'rules') state.checkView.editRules();
+    else state.checkView.run(id);
+    return;
+  }
   const ed = activeEditor();
   if (!ed) return;
   ed.setTool(id);
@@ -285,6 +296,8 @@ async function renderPcbSidePanel(el) {
     row('部品', pcb.footprints.length) + row('配線', pcb.tracks.length) + row('ビア', pcb.vias.length) + row('ベタ', pcb.zones.length) +
     row('未配線', conn.unrouted) + (conn.shorts.length ? `<p class="err">短絡の疑い: ${conn.shorts.map((s) => s.join('/')).map(esc).join('、')}</p>` : '');
   const nls = netlistStatus(state.project);
+  const ds = drcStatus(state.project, pcb), dr = state.project.checks?.drc;
+  html += `<p class="kv">DRC: ${{ none: '未実行', current: `最新（エラー${dr?.summary.errors ?? 0}・警告${dr?.summary.warnings ?? 0}）`, stale: '<span class="warn">変更後に未実行</span>' }[ds]}</p>`;
   if (pcb.footprints.length && (nls !== 'current' || pcb.netlistHash !== state.project.netlist?.sourceHash)) html += '<p class="warn">回路図が変わっています。ネットリストを再読込してください</p>';
   const sel = state.pcbEditor.selectionInfo();
   if (sel.length === 1 && sel[0].item) {
@@ -325,9 +338,12 @@ function renderOverlay() {
   $('#pcb-content').style.display = state.workspace === 'pcb' ? '' : 'none';
   const pv = $('#parts-view');
   pv.hidden = state.workspace !== 'parts';
-  document.querySelector('.zoom-ctl').hidden = state.workspace === 'parts';
-  $('#coords').hidden = state.workspace === 'parts';
+  $('#check-view').hidden = state.workspace !== 'check';
+  const noCanvas = state.workspace === 'parts' || state.workspace === 'check';
+  document.querySelector('.zoom-ctl').hidden = noCanvas;
+  $('#coords').hidden = noCanvas;
   if (state.workspace === 'parts') state.partsView.render();
+  if (state.workspace === 'check') state.checkView.render();
   // 一部でも実装済みならキャンバスを塞がない（未実装分はサイドパネル・モジュール状況に表示）
   if (workspaceStatus(ws) !== 'planned') { ov.hidden = true; return; }
   ov.hidden = false;
@@ -355,6 +371,8 @@ function renderSidePanel() {
   let html = `<h2>回路図</h2><p class="kv">部品 ${sh.components.filter((c) => c.kind !== 'power' && c.kind !== 'gnd').length}・配線 ${sh.wires.length}・ネット ${conn.nets.filter((n) => n.pins.length >= 2 || n.named).length}・未接続ピン ${conn.unconnectedPins.length}</p>`;
   const nls = netlistStatus(state.project);
   html += `<p class="kv">ネットリスト: ${{ none: '未生成', current: `最新（エラー${state.project.netlist?.summary.errors ?? 0}）`, stale: '<span class="warn">回路図が変更されています。再生成してください</span>' }[nls]}</p>`;
+  const es = ercStatus(state.project), er = state.project.checks?.erc;
+  html += `<p class="kv">ERC: ${{ none: '未実行', current: `最新（エラー${er?.summary.errors ?? 0}・警告${er?.summary.warnings ?? 0}）`, stale: '<span class="warn">変更後に未実行</span>' }[es]}</p>`;
   if (d.comps.length === 1 && state.editor.state.sel.size === 1) {
     const c = d.comps[0];
     const row = (k, v) => `<div class="kv"><span>${k}</span><b>${esc(v || '—')}</b></div>`;
@@ -384,6 +402,31 @@ function renderCanvas() {
   $('#grid-minor-rect').style.display = vp.scale < 4 ? 'none' : '';
   $('#coords').textContent = state.workspace === 'pcb' ? `${(vp.scale).toFixed(1)} px/mm` : `×${vp.scale.toFixed(1)}`;
   activeEditor()?.render();
+  renderMarker();
+}
+
+/** 検査結果の位置の印（画面上で一定の大きさ） */
+function renderMarker() {
+  const g = $('#check-marker');
+  const m = state.marker;
+  if (!m || m.ws !== state.workspace) { g.innerHTML = ''; return; }
+  const k = 1 / activeVp().scale;
+  const r = 16 * k, t = 26 * k;
+  g.innerHTML = `<circle cx="${m.x}" cy="${m.y}" r="${r}" stroke-width="${3 * k}"/><path d="M${m.x - t} ${m.y}h${t - r}M${m.x + r} ${m.y}h${t - r}M${m.x} ${m.y - t}v${t - r}M${m.x} ${m.y + r}v${t - r}" stroke-width="${3 * k}"/>`;
+}
+
+/** 検査結果の位置へ移動して印を出す */
+function jumpTo(ws, at, message) {
+  state.marker = { ws, x: at.x, y: at.y };
+  state.workspace = ws;
+  renderAll();
+  const { width, height } = $('#canvas').getBoundingClientRect();
+  const vp = ws === 'pcb' ? state.pcbVp : state.vp;
+  vp.scale = Math.max(vp.scale, ws === 'pcb' ? 24 : 12);
+  vp.x = at.x - width / 2 / vp.scale;
+  vp.y = at.y - (height / 2 - 30) / vp.scale;
+  renderCanvas();
+  if (message) toast(message);
 }
 
 let rafPending = false;
@@ -678,6 +721,14 @@ async function boot() {
       return (part && partFootprint(part)) || getFootprint(c.footprint);
     },
   });
+  state.checkView = createCheckView({
+    root: $('#check-view'),
+    getProject: () => state.project,
+    getPcb: () => ensurePcb(state.project),
+    mutate: (fn, reason) => { mutateProject(fn, reason); renderNav(); },
+    jump: jumpTo,
+    ask, toast, fmtTime,
+  });
   state.partsView = createPartsView({
     root: $('#parts-view'),
     lib: state.lib,
@@ -736,6 +787,6 @@ async function boot() {
 }
 
 // 開発・テスト用の操作口（コンソールから使える）
-window.pocketEDA = { state, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
+window.pocketEDA = { state, jumpTo, mutateProject, editSchematic, editPcb, undo, redo, store, showNetlist, saveNow: () => state.saver.flush(), version: APP_VERSION };
 
 boot();

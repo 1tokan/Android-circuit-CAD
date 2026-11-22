@@ -9,8 +9,8 @@ export const MODULES = [
   { id: 'lcsc',      name: 'LCSC部品検索・管理',     stage: 3, status: 'ready', note: '公式APIは非使用（CSV/JSON取込・手動登録・LCSCリンク）' },
   { id: 'netlist',   name: 'ネットリスト生成',       stage: 3, status: 'ready' },
   { id: 'pcb',       name: 'PCBレイアウトエディタ',  stage: 4, status: 'ready', note: 'ベタの塗りつぶし形状（クリアランス抜き）は第6段階で計算。自動配線・3D表示は将来' },
-  { id: 'erc',       name: 'ERC（電気的ルール）',    stage: 5, status: 'planned' },
-  { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'planned' },
+  { id: 'erc',       name: 'ERC（電気的ルール）',    stage: 5, status: 'ready', note: '1シートのみ。汎用ICのピン属性は「双方向」扱い（検査結果に未検査項目を表示）' },
+  { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'ready', note: 'ベタの間隔・島切れは第6段階（塗りつぶし計算）まで未検査' },
   { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'planned' },
   { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'planned' },
 ];
@@ -52,7 +52,11 @@ export const TOOLS = {
     { id: 'add', label: '登録', icon: 'M12 5v14M5 12h14' },
     { id: 'export', label: '書出', icon: 'M12 15V4M7 9l5-5 5 5M5 20h14' },
   ],
-  check: [{ id: 'erc', label: 'ERC' }, { id: 'drc', label: 'DRC' }],
+  check: [
+    { id: 'erc', label: 'ERC実行', icon: 'M4 12h4l2-5 4 10 2-5h4' },
+    { id: 'drc', label: 'DRC実行', icon: 'M4 4h16v16H4zM8 8h3v3H8zM13 13h3v3h-3zM11 9.5h4v3.5' },
+    { id: 'rules', label: 'ルール', icon: 'M5 6h14M5 12h14M5 18h14M9 4v4M15 10v4M8 16v4' },
+  ],
   output: [{ id: 'gerber', label: 'Gerber' }, { id: 'bom', label: 'BOM' }, { id: 'cpl', label: 'CPL' }],
 };
 

@@ -97,8 +97,8 @@ const LIST = [
   soic(8), soic(14), soic(16),
   soic(8, 0.65, 2.8625, 1.525, 0.4, 4.4, 3.0, 'TSSOP'), soic(14, 0.65, 2.8625, 1.525, 0.4, 4.4, 5.0, 'TSSOP'), soic(20, 0.65, 2.8625, 1.525, 0.4, 4.4, 6.5, 'TSSOP'),
   dip(8), dip(14), dip(16),
-  ...[1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20].map(pinHeader),
-  ...[2, 3, 4].map(jstPH),
+  ...[1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20].map((n) => pinHeader(n)), // map(pinHeader) だと添字がピッチに入るので不可
+  ...[2, 3, 4].map((n) => jstPH(n)),
   finish({ id: 'CP_Elec_5x5.4', name: 'CP_Elec_5x5.4', desc: 'SMD電解コンデンサ 5x5.4（1=+）', package: 'SMD,D5xL5.4mm', pads: [smd(1, -2.2, 0, 2.8, 1.6), smd(2, 2.2, 0, 2.8, 1.6)], body: { w: 5.3, h: 5.3 }, polarity: true, source: 'KiCad CP_Elec_5x5.4' }),
   finish({ id: 'CP_Elec_6.3x5.4', name: 'CP_Elec_6.3x5.4', desc: 'SMD電解コンデンサ 6.3x5.4（1=+）', package: 'SMD,D6.3xL5.4mm', pads: [smd(1, -2.7, 0, 3.3, 1.6), smd(2, 2.7, 0, 3.3, 1.6)], body: { w: 6.6, h: 6.6 }, polarity: true, source: 'KiCad CP_Elec_6.3x5.4' }),
   // タクトスイッチ 6x6 THT: 同番号2端子ずつ（内部で導通）

@@ -83,14 +83,13 @@ export function computeConnectivity(sheet) {
   const groups = new Map();
   const get = (node) => {
     const r = dsu.find(node);
-    if (!groups.has(r)) groups.set(r, { pins: [], wires: [], labels: [], names: new Set() });
+    if (!groups.has(r)) groups.set(r, { pins: [], wires: [], labels: [], names: new Set(), powerNames: new Set(), powerSymbols: 0 });
     return groups.get(r);
   };
   pins.forEach((p) => {
     const g = get(p.node);
-    if (p.isPower) g.names.add(p.name);
+    if (p.isPower) { g.names.add(p.name); g.powerNames.add(p.name); g.powerSymbols += 1; }
     else g.pins.push({ compId: p.compId, ref: p.ref, pin: p.pin, name: p.name, type: p.type });
-    if (p.isPower) g.powerSymbols = (g.powerSymbols || 0) + 1;
   });
   wires.forEach((w) => get(`w:${w.id}`).wires.push(w.id));
   labels.forEach((l) => { const g = get(`l:${l.id}`); g.labels.push(l.id); if (l.name.trim()) g.names.add(l.name.trim()); });
@@ -108,6 +107,8 @@ export function computeConnectivity(sheet) {
       pins: g.pins,
       wires: g.wires,
       labels: g.labels,
+      powerNames: [...g.powerNames].sort(),
+      powerSymbols: g.powerSymbols,
     });
   }
   nets.sort((a, b) => (b.named - a.named) || a.name.localeCompare(b.name));

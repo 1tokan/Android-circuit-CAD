@@ -1,5 +1,6 @@
 // PCB の SVG 描画（単位 mm）
-import { toMm, fpToBoard, boardRect } from './model.js';
+import { toMm, boardRect } from './model.js';
+import { silkSegments, pin1Mark, refdesPos } from './shapes.js';
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const mm = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
@@ -24,10 +25,11 @@ function footprintLayer(f, layer, selected) {
       if (p.type === 'tht') out.push(`<circle class="drill" cx="${p.x}" cy="${p.y}" r="${p.drill / 2}"/>`);
     }
   } else if (layer === 'Silk') {
-    const b = f.fpDef.body || { w: 1, h: 1 };
-    out.push(`<rect class="silk" x="${-b.w / 2}" y="${-b.h / 2}" width="${b.w}" height="${b.h}"/>`);
-    const p1 = f.fpDef.pads.find((p) => p.num === '1');
-    if (p1 && f.fpDef.pads.length > 2) out.push(`<circle class="silk-dot" cx="${p1.x - Math.sign(p1.x || -1) * (p1.w / 2 + 0.4)}" cy="${p1.y}" r="0.2"/>`);
+    // 本体の外形線はパッドの周囲で切ってある（パッドにシルクを載せない）
+    const segs = silkSegments(f.fpDef);
+    if (segs.length) out.push(`<path class="silk" d="${segs.map((q) => `M${q.a.x} ${q.a.y}L${q.b.x} ${q.b.y}`).join('')}"/>`);
+    const m = pin1Mark(f.fpDef);
+    if (m) out.push(`<circle class="silk-dot" cx="${m.x}" cy="${m.y}" r="0.2"/>`);
   }
   return `<g class="fp ${side === 'B' ? 'bottom' : 'top'}${selected ? ' sel' : ''}" transform="${fpTransform(f)}">${out.join('')}</g>`;
 }
@@ -65,12 +67,11 @@ export function renderPcb(pcb, { selection = new Set(), conn = null, activeLayer
   if (S.silk) {
     out.push('<g class="silk-layer">' + fps.map((f) => footprintLayer(f, 'Silk', selection.has(`f:${f.id}`))).join(''));
     for (const f of pcb.footprints) {
-      const c = f.fpDef.courtyard;
-      const top = fpToBoard({ ...f, rot: 0 }, 0, c.y0 - 0.3);
-      out.push(`<text class="refdes ${f.side === 'bottom' ? 'bottom' : ''}${selection.has(`f:${f.id}`) ? ' sel' : ''}" x="${toMm(f.x)}" y="${Math.min(top.y, toMm(f.y) - 0.3)}" font-size="0.9">${esc(f.ref)}</text>`);
+      const rp = refdesPos(f);
+      out.push(`<text class="refdes ${f.side === 'bottom' ? 'bottom' : ''}${selection.has(`f:${f.id}`) ? ' sel' : ''}" x="${rp.x}" y="${rp.y}" font-size="${rp.size}" text-anchor="middle">${esc(f.ref)}</text>`);
     }
     for (const t of pcb.texts) {
-      out.push(`<text class="silk-text ${t.layer === 'B.SilkS' ? 'bottom' : ''}${selection.has(`x:${t.id}`) ? ' sel' : ''}" x="${toMm(t.x)}" y="${toMm(t.y)}" font-size="${toMm(t.size)}" transform="rotate(${t.rot || 0} ${toMm(t.x)} ${toMm(t.y)})${t.layer === 'B.SilkS' ? ` translate(${2 * toMm(t.x)} 0) scale(-1 1)` : ''}" dominant-baseline="central">${esc(t.text)}</text>`);
+      out.push(`<text class="silk-text ${t.layer === 'B.SilkS' ? 'bottom' : ''}${selection.has(`x:${t.id}`) ? ' sel' : ''}" x="${toMm(t.x)}" y="${toMm(t.y)}" font-size="${toMm(t.size)}" text-anchor="middle" transform="rotate(${t.rot || 0} ${toMm(t.x)} ${toMm(t.y)})${t.layer === 'B.SilkS' ? ` translate(${2 * toMm(t.x)} 0) scale(-1 1)` : ''}" dominant-baseline="central">${esc(t.text)}</text>`);
     }
     out.push('</g>');
   }

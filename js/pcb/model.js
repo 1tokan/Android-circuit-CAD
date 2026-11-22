@@ -122,7 +122,7 @@ export function importNetlist(pcb, nl, resolveFp) {
     const snap = JSON.parse(JSON.stringify({ id: def.id, name: def.name, pads: def.pads, body: def.body, courtyard: def.courtyard, generated: !!def.generated, verified: !!def.verified, jlcRotation: def.jlcRotation || 0 }));
     let inst = (c.compId && byComp.get(c.compId)) || byRef.get(c.ref);
     if (inst) {
-      if (inst.fpDef.id !== snap.id) { inst.fpDef = snap; report.fpChanged.push(c.ref); }
+      if (inst.fpDef.id !== snap.id || JSON.stringify(inst.fpDef.pads) !== JSON.stringify(snap.pads) || JSON.stringify(inst.fpDef.body) !== JSON.stringify(snap.body)) { inst.fpDef = snap; report.fpChanged.push(c.ref); }
       inst.ref = c.ref; inst.value = c.value; inst.compId = c.compId || inst.compId;
       inst.padNets = padNetsOf.get(c.ref) || {};
       inst.lcsc = c.lcsc; inst.dnp = !!c.dnp;

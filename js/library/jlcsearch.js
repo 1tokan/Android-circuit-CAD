@@ -83,7 +83,7 @@ export function createJlcsearch({ base = DEFAULT_BASE, fetchImpl = (...a) => fet
   async function getJSON(path) {
     const url = `${baseUrl}${path}`;
     const hit = cache.get(url);
-    if (hit && now() - hit.at < CACHE_MS) return hit.data;
+    if (hit && now() - hit.at < CACHE_MS) return hit;
     const wait = last + MIN_INTERVAL_MS - now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     last = now();
@@ -101,8 +101,9 @@ export function createJlcsearch({ base = DEFAULT_BASE, fetchImpl = (...a) => fet
     if (!res.ok) throw new JlcsearchError('http', `サーバーエラー (HTTP ${res.status})`);
     let data;
     try { data = await res.json(); } catch { throw new JlcsearchError('format', '応答がJSONではありません'); }
-    cache.set(url, { at: now(), data });
-    return data;
+    const entry = { at: now(), data };
+    cache.set(url, entry);
+    return entry;
   }
 
   return {
@@ -129,9 +130,9 @@ export function createJlcsearch({ base = DEFAULT_BASE, fetchImpl = (...a) => fet
         if (packageName) params.set('package', packageName);
         path = `/api/search?${params}`;
       }
-      const data = await getJSON(path);
+      const { data, at: fetchedAt } = await getJSON(path);
       const list = Array.isArray(data) ? data : (data.components || Object.values(data).find(Array.isArray) || []);
-      const at = new Date(now()).toISOString();
+      const at = new Date(fetchedAt).toISOString(); // 取得時刻（キャッシュからでも同じ値）
       const parts = [];
       const seen = new Set();
       for (const raw of list) {
