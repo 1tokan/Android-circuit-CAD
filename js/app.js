@@ -17,7 +17,7 @@ import { getFootprint } from './library/footprints.js';
 import { generateNetlist, netlistStatus, formatNetlistText } from './netlist/netlist.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 
 const state = {
   project: null,

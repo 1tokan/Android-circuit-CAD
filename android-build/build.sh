@@ -19,8 +19,28 @@ npx cap sync android
 cp -r android-build/res/* android/app/src/main/res/
 # バージョン
 sed -i -E "s/versionCode [0-9]+/versionCode ${CODE}/; s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" android/app/build.gradle
-# 毎回同じ鍵で署名（上書きインストールできるように）
-mkdir -p "$HOME/.android" && cp android-build/debug.keystore "$HOME/.android/debug.keystore"
+# 毎回同じ鍵で署名（上書きインストールできるように）。
+# ~/.android/debug.keystore はビルド環境によって読まれないことがあったので、build.gradle で鍵を明示する
+KS="$(pwd)/android-build/debug.keystore"
+python3 - "$KS" <<'PY'
+import re, sys
+ks = sys.argv[1]
+p = 'android/app/build.gradle'
+s = open(p).read()
+cfg = f'''
+    signingConfigs {{
+        debug {{
+            storeFile file("{ks}")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }}
+    }}
+'''
+s, n = re.subn(r'^android \{\n', 'android {\n' + cfg, s, count=1, flags=re.M)
+assert n == 1, 'build.gradle に android { が見つかりません'
+open(p, 'w').write(s)
+PY
 
 # 組み込みプラグインの確認（Filesystem と Share が無ければ失敗させる）
 grep -q '"@capacitor/filesystem"' android/app/src/main/assets/capacitor.plugins.json
@@ -28,4 +48,12 @@ grep -q '"@capacitor/share"' android/app/src/main/assets/capacitor.plugins.json
 
 (cd android && ./gradlew assembleDebug --no-daemon -q)
 cp android/app/build/outputs/apk/debug/app-debug.apk "dist/pocket-eda-${VERSION}.apk"
+
+# 署名の確認: リポジトリの鍵で署名されていなければ失敗させる（別の鍵だとスマホで上書き更新できない）
+EXPECTED=$(keytool -list -v -keystore "$KS" -storepass android -alias androiddebugkey 2>/dev/null | grep 'SHA256:' | head -1 | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-F' 'a-f')
+APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+ACTUAL=$("$APKSIGNER" verify --print-certs "dist/pocket-eda-${VERSION}.apk" | grep 'SHA-256 digest' | head -1 | sed 's/.*: //')
+echo "expected cert: $EXPECTED"
+echo "actual cert:   $ACTUAL"
+[ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo '署名鍵が一致しません'; exit 1; }
 ls -la dist
