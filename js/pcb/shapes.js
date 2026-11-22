@@ -2,6 +2,9 @@
 import { toMm, fpToBoard, padLayers, fpBox } from './model.js';
 import { textStrokes, strokeWidthFor } from './text.js';
 
+/** 角丸パッドの角の半径 = 短辺 × この値（画面・Gerber・3D で共通） */
+export const ROUNDRECT_RATIO = 0.25;
+
 /** パッドの形状（角形・角丸は四角形として保守的に扱う） */
 export function padShape(inst, pad) {
   if (pad.shape === 'circle') {

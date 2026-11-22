@@ -7,9 +7,9 @@ import {
 } from './parts.js';
 import { importCSV, importJSON, exportLibraryJSON } from './importer.js';
 import { symbolPreviewSVG } from '../schematic/render.js';
+import { esc } from '../core/util.js';
 
 const $ = (s, el = document) => el.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const PART_KINDS = KINDS.filter((k) => !k.power);
 
 /**

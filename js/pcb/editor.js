@@ -1,14 +1,15 @@
 // PCB レイアウトエディタ（操作・UI）
 // データの変更は必ず ctx.edit(fn, label) を通す（PCB用の元に戻す履歴と自動保存に乗せる）
 import {
-  ensurePcb, toNm, toMm, arrangeInBoard, fpBox, boardRect, routePath, snapMm, addTrackPath, addVia, addBoardZone, addText, addHole, setOutlineRect,
+  ensurePcb, toNm, toMm, arrangeInBoard, copperLayers, layerName, fpBox, boardRect, routePath, snapMm, addTrackPath, addVia, addBoardZone, addText, addHole, setOutlineRect,
   hitTest, itemsInRect, moveSelection, rotateSelection, flipSelection, deleteSelection, findItem, boardSizeText, importNetlist,
 } from './model.js';
 import { computePcbConnectivity, snapTarget } from './connectivity.js';
+import { drcRules } from '../check/rules.js';
 import { renderPcb } from './render.js';
+import { esc } from '../core/util.js';
 
 const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const PCB_MODE_TOOLS = ['select', 'route', 'via', 'zone', 'outline', 'text'];
 const WIDTHS = [0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.8, 1.0];
 
@@ -47,7 +48,7 @@ export function createPcbEditor(ctx) {
     refillTimer = setTimeout(() => {
       refillTimer = null;
       if (st.drag || !ctx.isActive()) { if (st.drag) scheduleRefill(); return; }
-      st.conn = computePcbConnectivity(pcb(), { rules: ctx.getProject().board?.rules || {} });
+      st.conn = computePcbConnectivity(pcb(), { rules: drcRules(ctx.getProject()) });
       render();
       ctx.onSelectionChange?.();
     }, 350);
@@ -74,7 +75,7 @@ export function createPcbEditor(ctx) {
       if (last) preview.routeStart = st.route.pts[0];
       if (!last && st.hover) preview.cursor = snapTarget(pcb(), st.hover, 12 / ctx.vp.scale, st.layer) || snapPt(st.hover);
     }
-    const rules = ctx.getProject().board?.rules || {};
+    const rules = drcRules(ctx.getProject());
     // ベタの塗り直しは重いので、編集直後は前回の塗りを薄く表示し、手が止まってから塗り直す
     st.conn = computePcbConnectivity(pcb(), { rules, allowStaleFill: true });
     if (st.conn.fillStale) scheduleRefill();
@@ -86,7 +87,8 @@ export function createPcbEditor(ctx) {
   function renderCtxBar() {
     const bar = $('#ctxbar');
     const chip = (act, label, on = false) => `<button type="button" class="chip${on ? ' on' : ''}" data-pctx="${act}">${esc(label)}</button>`;
-    const layerChip = chip('layer', st.layer === 'F.Cu' ? '層: 表(F)' : '層: 裏(B)', st.layer === 'B.Cu');
+    if (!copperLayers(pcb()).includes(st.layer)) st.layer = 'F.Cu'; // 層数を減らしたとき
+    const layerChip = chip('layer', `層: ${layerName(st.layer)}`, st.layer !== 'F.Cu');
     const info = `<span class="chip-info">${esc(boardSizeText(pcb()))}・未配線 <b>${st.conn?.unrouted ?? 0}</b>${st.conn?.shorts.length ? ` ・<span class="err">短絡 ${st.conn.shorts.length}</span>` : ''}</span>`;
     const c = [];
     if (st.tool === 'select') {
@@ -125,7 +127,7 @@ export function createPcbEditor(ctx) {
         break;
       }
       case 'multi': st.multi = !st.multi; break;
-      case 'layer': st.layer = st.layer === 'F.Cu' ? 'B.Cu' : 'F.Cu'; break;
+      case 'layer': st.layer = nextLayer(); break;
       case 'props': await editProps(); break;
       case 'rotate': case 'flip': case 'delete': action(a); return;
       case 'clear': setSel(new Set(), false); break;
@@ -272,17 +274,31 @@ export function createPcbEditor(ctx) {
     render();
   }
 
-  function routeVia() {
+  /** 作業層を次へ（表 → 内層1 → … → 裏 → 表） */
+  function nextLayer() {
+    const cu = copperLayers(pcb());
+    return cu[(cu.indexOf(st.layer) + 1) % cu.length];
+  }
+
+  async function routeVia() {
     const last = st.route.pts[st.route.pts.length - 1];
     if (!last) return;
+    const cu = copperLayers(pcb()).filter((l) => l !== st.layer);
+    let to = cu.length === 1 ? cu[0] : null;
+    if (!to) {
+      // 4・6層: 移る層を選ぶ（ビアは全層を貫通）
+      to = await ctx.ui.ask('ビアで移る層', cu.map((l) => `<button type="button" class="btn list-btn" data-key="${l}">${esc(layerName(l))}（${l}）</button>`).join(''), [{ label: 'キャンセル', value: '' }], true);
+      if (!to) return;
+    }
     edit((b) => addVia(b, last.x, last.y, st.route.net), 'ビア');
-    st.layer = st.layer === 'F.Cu' ? 'B.Cu' : 'F.Cu';
-    ctx.ui.toast(`ビアを置いて${st.layer === 'F.Cu' ? '表' : '裏'}面に移りました`);
+    st.layer = to;
+    ctx.ui.toast(`ビアを置いて${layerName(to)}に移りました`);
+    render();
   }
 
   async function pickWidth() {
     const btns = WIDTHS.map((w) => `<button type="button" class="btn list-btn" data-key="${w}">${w} mm</button>`).join('');
-    const r = await ctx.ui.ask('配線幅', `<p class="note">設計ルールの最小配線幅は ${ctx.getProject().board?.rules?.minTrackWidthMm ?? 0.127}mm です（第5段階のDRCで検査）。電源・GNDは太めに。</p>${btns}`, [{ label: '閉じる', value: '' }], true);
+    const r = await ctx.ui.ask('配線幅', `<p class="note">設計ルールの最小配線幅は ${drcRules(ctx.getProject()).minTrackWidthMm}mm です（DRCで検査）。電源・GNDは太めに。</p>${btns}`, [{ label: '閉じる', value: '' }], true);
     if (r) edit((b) => { b.settings.trackWidth = toNm(Number(r)); }, '配線幅');
   }
 
@@ -297,12 +313,12 @@ export function createPcbEditor(ctx) {
     const nets = netNames();
     if (!nets.length) { ctx.ui.toast('先にネットリストを読み込んでください', true); return; }
     const html = `<label class="field"><span>ネット</span><select name="net">${nets.map((n) => `<option ${n === 'GND' ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
-      <label class="field"><span>層</span><select name="layer"><option value="F.Cu" ${st.layer === 'F.Cu' ? 'selected' : ''}>表 (F.Cu)</option><option value="B.Cu" ${st.layer === 'B.Cu' ? 'selected' : ''}>裏 (B.Cu)</option><option value="both">両面</option></select></label>
-      <p class="note">基板外形から縁のクリアランス分内側に作ります。他ネットとのクリアランスを抜いた実際の塗りつぶし形状は第6段階（Gerber生成）で計算します。それまでは「範囲内の同ネットのパッドはつながる」とみなす推定です。</p>`;
+      <label class="field"><span>層</span><select name="layer">${copperLayers(pcb()).map((l) => `<option value="${l}" ${st.layer === l ? 'selected' : ''}>${esc(layerName(l))} (${l})</option>`).join('')}<option value="both">表と裏</option></select></label>
+      <p class="note">基板外形から縁のクリアランス分内側に作り、別ネットの銅・取付穴の周りを抜いて塗ります（同ネットのパッドはサーマルでつなぐ）。4・6層では内層を GND・電源の面にするのが一般的です。</p>`;
     const r = await ctx.ui.ask('ベタ（GNDポリゴン）', `<div class="form">${html}</div>`, [{ label: 'キャンセル', value: '' }, { label: '作成', value: 'ok', cls: 'primary' }]);
     if (r !== 'ok') return;
     const net = $('#dialog-body [name="net"]').value, layer = $('#dialog-body [name="layer"]').value;
-    const edge = ctx.getProject().board?.rules?.boardEdgeClearanceMm ?? 0.3;
+    const edge = drcRules(ctx.getProject()).boardEdgeClearanceMm;
     edit((b) => { for (const l of layer === 'both' ? ['F.Cu', 'B.Cu'] : [layer]) addBoardZone(b, l, net, Math.max(0.5, edge)); }, 'ベタ');
     ctx.ui.toast(`${net} のベタを作成しました`);
     render();
@@ -313,7 +329,7 @@ export function createPcbEditor(ctx) {
     const r = await ctx.ui.ask('基板外形（長方形）', `<div class="form">
       <label class="field"><span>幅 (mm)</span><input type="text" name="w" inputmode="decimal" value="${toMm(o.w)}"></label>
       <label class="field"><span>高さ (mm)</span><input type="text" name="h" inputmode="decimal" value="${toMm(o.h)}"></label>
-      <p class="note">左上が原点 (0,0) です。JLCPCB の最小基板サイズは要確認（第7段階で発注条件と照合）。</p></div>`,
+      <p class="note">左上が原点 (0,0) です。層数・板厚・色などの製造仕様は「出力」タブで設定します。</p></div>`,
     [{ label: 'キャンセル', value: '' }, { label: '保存', value: 'ok', cls: 'primary' }]);
     if (r !== 'ok') return;
     const w = Number($('#dialog-body [name="w"]').value), h = Number($('#dialog-body [name="h"]').value);
@@ -373,7 +389,7 @@ export function createPcbEditor(ctx) {
         `<p class="note">値: ${esc(o.value)}${o.lcsc ? `・LCSC ${esc(o.lcsc)}` : ''}${o.fpDef.generated ? '・フットプリントは推定（要確認）' : ''}</p>`;
     } else if (k === 't') {
       title = `配線（${o.net || 'ネットなし'}）`;
-      html = f('width', '幅 (mm)', toMm(o.width)) + `<label class="field"><span>層</span><select name="layer"><option value="F.Cu" ${o.layer === 'F.Cu' ? 'selected' : ''}>表</option><option value="B.Cu" ${o.layer === 'B.Cu' ? 'selected' : ''}>裏</option></select></label>`;
+      html = f('width', '幅 (mm)', toMm(o.width)) + `<label class="field"><span>層</span><select name="layer">${copperLayers(pcb()).map((l) => `<option value="${l}" ${o.layer === l ? 'selected' : ''}>${esc(layerName(l))}</option>`).join('')}</select></label>`;
     } else if (k === 'v') {
       title = `ビア（${o.net || 'ネットなし'}）`;
       html = f('diameter', '外径 (mm)', toMm(o.diameter)) + f('drill', '穴径 (mm)', toMm(o.drill));
@@ -414,7 +430,7 @@ export function createPcbEditor(ctx) {
     else if (key === 'delete' || key === 'backspace') action('delete');
     else if (key === 'x') setTool('route');
     else if (key === 'v') { if (st.tool === 'route' && st.route.pts.length) { routeVia(); render(); } else setTool('via'); }
-    else if (key === 'l') { st.layer = st.layer === 'F.Cu' ? 'B.Cu' : 'F.Cu'; render(); }
+    else if (key === 'l') { st.layer = nextLayer(); render(); }
     else if (key === 'e' && st.sel.size === 1) editProps();
     else return;
     e.preventDefault();
@@ -434,9 +450,9 @@ export function createPcbEditor(ctx) {
     render, setTool, action, editProps, importFromSchematic,
     resetForProject() { st.sel = new Set(); st.route = { pts: [], net: null }; st.drag = null; st.tool = 'select'; st.layer = 'F.Cu'; },
     /** 最新の接続（ベタも塗り直す） */
-    connectivity: () => computePcbConnectivity(pcb(), { rules: ctx.getProject().board?.rules || {} }),
+    connectivity: () => computePcbConnectivity(pcb(), { rules: drcRules(ctx.getProject()) }),
     /** 画面に出ている接続（ベタは塗り直し待ちのことがある。サイドパネル用） */
-    lastConnectivity: () => st.conn || computePcbConnectivity(pcb(), { rules: ctx.getProject().board?.rules || {}, allowStaleFill: true }),
+    lastConnectivity: () => st.conn || computePcbConnectivity(pcb(), { rules: drcRules(ctx.getProject()), allowStaleFill: true }),
     selectionInfo: () => [...st.sel].map((k) => ({ key: k, item: findItem(pcb(), k) })),
   };
 }

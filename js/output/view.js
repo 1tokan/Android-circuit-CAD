@@ -1,17 +1,23 @@
 // 「出力」画面: 製造データ（Gerber・ドリル）の確認と書き出し
-import { buildPlot, LAYERS } from './plot.js';
+import { buildPlot } from './plot.js';
+import { FAB_OPTIONS, LABELS, COLORS, adaptFab, checkFab, orderSheet, stackupText } from './fabspec.js';
+import { layerName } from '../pcb/model.js';
 import { gerberFiles } from './gerber.js';
 import { makeZip } from './zip.js';
 import { drcStatus } from '../check/drc.js';
 import { buildAssembly, bomCsv, cplCsv } from './assembly.js';
 import { lcscUrl } from '../library/parts.js';
+import { esc } from '../core/util.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // プレビューの色（基板を上から見た色に近づける）
 const PREVIEW = {
   'Edge.Cuts': { color: '#e8d34a', label: '外形' },
   'B.Cu': { color: '#3b6fd6', label: '裏銅' },
+  'In4.Cu': { color: '#2fb5c9', label: '内層4' },
+  'In3.Cu': { color: '#d98c2b', label: '内層3' },
+  'In2.Cu': { color: '#b55bd6', label: '内層2' },
+  'In1.Cu': { color: '#3fb67a', label: '内層1' },
   'F.Cu': { color: '#c83a3a', label: '表銅' },
   'B.Mask': { color: '#6fa8ff', label: '裏レジスト開口' },
   'F.Mask': { color: '#ffb36b', label: '表レジスト開口' },
@@ -21,7 +27,7 @@ const PREVIEW = {
   'F.SilkS': { color: '#f2f2f2', label: '表シルク' },
   drill: { color: '#000000', label: '穴' },
 };
-const ORDER = ['B.Cu', 'F.Cu', 'B.Mask', 'F.Mask', 'B.Paste', 'F.Paste', 'B.SilkS', 'F.SilkS', 'drill', 'Edge.Cuts'];
+const ORDER = ['B.Cu', 'In4.Cu', 'In3.Cu', 'In2.Cu', 'In1.Cu', 'F.Cu', 'B.Mask', 'F.Mask', 'B.Paste', 'F.Paste', 'B.SilkS', 'F.SilkS', 'drill', 'Edge.Cuts'];
 
 /** アパーチャ → SVG（at を原点とした相対座標） */
 function apSvg(ap, at) {
@@ -59,16 +65,16 @@ export function plotLayerSvg(prims, color) {
 }
 
 /**
- * @param ctx { root, getProject, getPcb, version, toast, ask, download, runDrc, fmtTime }
+ * @param ctx { root, getProject, getPcb, version, toast, ask, download, runDrc, fmtTime, mutate, editPcb, open3d }
  */
 export function createOutputView(ctx) {
-  const st = { show: new Set(['Edge.Cuts', 'B.Cu', 'F.Cu', 'F.SilkS', 'drill']), tentVias: true, last: null, boards: 5, tab: 'gerber' };
+  const st = { show: new Set(['Edge.Cuts', 'B.Cu', 'F.Cu', 'F.SilkS', 'drill']), last: null, boards: 5, tab: 'gerber' };
   let memo = { key: null, plot: null };
 
   function getPlot() {
     const p = ctx.getProject(), pcb = ctx.getPcb();
-    const key = JSON.stringify([p.revision, st.tentVias]);
-    if (memo.key !== key) memo = { key, plot: buildPlot(p, pcb, { tentVias: st.tentVias }) };
+    const key = String(p.revision);
+    if (memo.key !== key) memo = { key, plot: buildPlot(p, pcb) };
     return memo.plot;
   }
 
@@ -79,7 +85,7 @@ export function createOutputView(ctx) {
     const g = [];
     g.push(`<rect x="${b.x0}" y="${b.y0}" width="${b.w}" height="${b.h}" fill="#0d3b22"/>`);
     for (const id of ORDER) {
-      if (!st.show.has(id)) continue;
+      if (!st.show.has(id) || (!plot.layers[id] && id !== 'drill')) continue;
       if (id === 'drill') {
         g.push(`<g fill="#000">${[...plot.drills.pth, ...plot.drills.npth].map((h) => `<circle cx="${h.x}" cy="${h.y}" r="${h.d / 2}"/>`).join('')}</g>`);
         continue;
@@ -101,34 +107,88 @@ export function createOutputView(ctx) {
     const holes = plot.drills.pth.length + plot.drills.npth.length;
     const minDrill = Math.min(...[...plot.drills.pth, ...plot.drills.npth].map((h) => h.d), Infinity);
     const minTrack = Math.min(...pcb.tracks.map((t) => t.width / 1e6), Infinity);
-    const chips = ORDER.map((id) => `<button class="chip${st.show.has(id) ? ' on' : ''}" data-layer="${id}"><i style="background:${PREVIEW[id].color}"></i>${PREVIEW[id].label}</button>`).join('');
+    const nL = pcb.settings?.layers || 2;
+    const fab = p.board.fab;
+    const fabIssues = checkFab(fab, nL);
+    const sheet = orderSheet({ layers: nL, fab, board: plot.board, files: plot.layerDefs.map((l) => '.' + l.ext.toUpperCase()), holes, minTrack: minTrack < Infinity ? minTrack : 0, minDrill: minDrill < Infinity ? minDrill : 0, smdParts: pcb.footprints.filter((f) => !f.dnp).length });
+    const chips = ORDER.filter((id) => id === 'drill' || plot.layers[id]).map((id) => `<button class="chip${st.show.has(id) ? ' on' : ''}" data-layer="${id}"><i style="background:${PREVIEW[id].color}"></i>${PREVIEW[id].label}</button>`).join('');
     const files = st.last ? `<details open><summary>前回書き出したファイル（${st.last.files.length}）</summary><ul class="files">${st.last.files.map((f) => `<li><span>${esc(f.name)}</span><small>${(f.content.length / 1024).toFixed(1)} KB</small></li>`).join('')}</ul><p class="note">${esc(ctx.fmtTime(st.last.at))}・ZIP ${(st.last.size / 1024).toFixed(1)} KB</p></details>` : '';
     const tabs = `<div class="chips seg">${[['gerber', '基板（Gerber）'], ['asm', '部品実装（BOM・CPL）']].map(([k, l]) => `<button class="chip${st.tab === k ? ' on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
     if (st.tab === 'asm') { ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}${assemblyHtml()}</div>`; bindCommon(); bindAssembly(); return; }
     ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}
       <div class="check-card on">
         <div class="check-card-head"><b>Gerber・ドリル（JLCPCB 向け）</b>${drcLine}</div>
-        <small>基板 ${plot.board.w.toFixed(1)} × ${plot.board.h.toFixed(1)} mm・2層・部品 ${pcb.footprints.length}・穴 ${holes}${minDrill < Infinity ? `（最小 φ${minDrill.toFixed(2)}）` : ''}${minTrack < Infinity ? `・最小配線幅 ${minTrack.toFixed(3)} mm` : ''}</small>
-        <label class="opt"><input type="checkbox" id="opt-tent" ${st.tentVias ? 'checked' : ''}> ビアをレジストで覆う（テンティング）</label>
-        <div class="check-card-actions"><button class="btn primary" data-export>ZIPを書き出す</button>${ds !== 'current' ? '<button class="btn" data-drc>DRCを実行</button>' : ''}</div>
+        <small>基板 ${plot.board.w.toFixed(1)} × ${plot.board.h.toFixed(1)} mm・${nL}層・部品 ${pcb.footprints.length}・穴 ${holes}${minDrill < Infinity ? `（最小 φ${minDrill.toFixed(2)}）` : ''}${minTrack < Infinity ? `・最小配線幅 ${minTrack.toFixed(3)} mm` : ''}</small>
+        <div class="check-card-actions"><button class="btn primary" data-export>ZIPを書き出す</button><button class="btn" data-3d>3Dで見る</button>${ds !== 'current' ? '<button class="btn" data-drc>DRCを実行</button>' : ''}</div>
       </div>
+      ${fabHtml(nL, fab, fabIssues)}
       <h3>プレビュー（書き出す図形そのもの・上から見た向き）</h3>
       <div class="chips">${chips}</div>
       ${preview(plot)}
       ${plot.notes.length ? `<ul class="uncovered">${plot.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
       ${files}
       <details><summary>JLCPCB への注文</summary>
-        <ol class="howto"><li>「ZIPを書き出す」で保存</li><li>JLCPCB の見積もりページ（jlcpcb.com）で「Add gerber file」から ZIP をアップロード</li><li>表示された基板の画像と寸法・層数（2層）・板厚を確認して注文</li></ol>
+        <ol class="howto"><li>「ZIPを書き出す」で保存</li><li>JLCPCB の見積もりページ（jlcpcb.com）で「Add gerber file」から ZIP をアップロード</li><li>表示された基板の画像と寸法を確認し、下の一覧のとおりに注文フォームを選ぶ${nL >= 4 ? '（4・6層は内層の順序 G1→L2… の確認を求められることがあります）' : ''}</li></ol>
+        <pre class="order-sheet">${esc(sheet.text)}</pre><button class="btn small-btn" data-copy-sheet>一覧をコピー</button>
         <p class="note">部品実装（PCBA）を頼むときは、下の「部品実装」で BOM・CPL を書き出し、注文画面の「PCB Assembly」で BOM と CPL をアップロードします。</p>
       </details>
-      <details><summary>出力するファイル</summary><ul class="cover">${LAYERS.map((l) => `<li><span>.${l.ext}</span>${esc(l.name)}</li>`).join('')}<li><span>.drl</span>メッキ穴（PTH）・非メッキ穴（NPTH）のドリル（Excellon）</li></ul>
+      <details><summary>出力するファイル</summary><ul class="cover">${plot.layerDefs.map((l) => `<li><span>.${l.ext}</span>${esc(l.name)}</li>`).join('')}<li><span>.drl</span>メッキ穴（PTH）・非メッキ穴（NPTH）のドリル（Excellon）</li></ul>
         <p class="note">Gerber は RS-274X（X2属性つき）・mm・4.6形式。Y は上向き（基板座標を反転）。</p></details>
     </div>`;
     bindCommon();
     ctx.root.querySelectorAll('[data-layer]').forEach((b) => { b.onclick = () => { const id = b.dataset.layer; st.show.has(id) ? st.show.delete(id) : st.show.add(id); render(); }; });
-    ctx.root.querySelector('#opt-tent').onchange = (e) => { st.tentVias = e.target.checked; render(); };
+    bindFab(nL);
+    ctx.root.querySelector('[data-3d]').onclick = () => ctx.open3d();
+    ctx.root.querySelector('[data-copy-sheet]').onclick = async () => { try { await navigator.clipboard.writeText(sheet.text); ctx.toast('コピーしました'); } catch { ctx.toast('コピーできませんでした', true); } };
     ctx.root.querySelector('[data-export]').onclick = () => exportZip();
     ctx.root.querySelector('[data-drc]')?.addEventListener('click', () => { ctx.runDrc(); render(); });
+  }
+
+  function sel(name, values, cur, label = (v) => v) {
+    return `<select name="${name}">${values.map((v) => `<option value="${v ?? ''}" ${String(v) === String(cur) ? 'selected' : ''}>${esc(label(v))}</option>`).join('')}</select>`;
+  }
+
+  /** 製造仕様（層数は PCB の設定、ほかは board.fab） */
+  function fabHtml(nL, fab, issues) {
+    const row = (l, html) => `<label class="field"><span>${l}</span>${html}</label>`;
+    return `<details class="fab" open><summary>製造仕様（JLCPCB の注文フォームの項目）</summary>
+      <div class="fab-grid">
+        ${row('層数', sel('layers', FAB_OPTIONS.layers, nL, (v) => `${v}層`))}
+        ${row('板厚', sel('thicknessMm', FAB_OPTIONS.thicknessMm[nL], fab.thicknessMm, (v) => `${v} mm`))}
+        ${nL >= 4 ? row('積層構成', sel('stackup', FAB_OPTIONS.stackup[nL], fab.stackup)) : ''}
+        ${row('外層銅厚', sel('outerCopperOz', FAB_OPTIONS.outerCopperOz, fab.outerCopperOz, (v) => `${v} oz`))}
+        ${nL >= 4 ? row('内層銅厚', sel('innerCopperOz', FAB_OPTIONS.innerCopperOz, fab.innerCopperOz, (v) => `${v} oz`)) : ''}
+        ${row('レジスト色', sel('maskColor', FAB_OPTIONS.maskColor, fab.maskColor, (v) => LABELS.maskColor[v]))}
+        ${row('シルク色', sel('silkColor', FAB_OPTIONS.silkColor, fab.silkColor, (v) => LABELS.silkColor[v]))}
+        ${row('表面処理', sel('finish', FAB_OPTIONS.finish, fab.finish, (v) => LABELS.finish[v]))}
+        ${row('ビアの処理', sel('viaProcess', FAB_OPTIONS.viaProcess, fab.viaProcess, (v) => LABELS.viaProcess[v]))}
+      </div>
+      <p class="note"><i class="swatch" style="background:${COLORS.mask[fab.maskColor]}"></i> ${esc(stackupText(nL, fab))}</p>
+      ${issues.length ? `<ul class="issues">${issues.map((x) => `<li class="issue ${x.level}"><span class="lv">${x.level === 'error' ? '✕' : '!'}</span><span class="msg">${esc(x.message)}</span></li>`).join('')}</ul>` : ''}
+      ${nL >= 4 ? `<p class="note">内層: ${Array.from({ length: nL - 2 }, (_, i) => `In${i + 1}.Cu = ${layerName(`In${i + 1}.Cu`)}（L${i + 2}・.G${i + 1}）`).join('、')}。設計ルールは ${nL} 層の値（最小配線幅・間隔 0.09mm、ビア穴 0.2mm／外径 0.45mm）になります</p>` : ''}
+    </details>`;
+  }
+
+  function bindFab(nL) {
+    ctx.root.querySelectorAll('.fab select').forEach((el) => {
+      el.onchange = () => {
+        const name = el.name;
+        const raw = el.value;
+        const v = raw === '' ? null : Number.isFinite(Number(raw)) ? Number(raw) : raw;
+        if (name === 'layers') {
+          // 層数は PCB の設定（元に戻せる）。製造仕様もその層数で選べる値に合わせる
+          ctx.editPcb(() => { ctx.getPcb().settings.layers = v; }, `${v}層に変更`);
+          ctx.mutate((q) => { q.board.fab = adaptFab(q.board.fab, v); }, 'fab');
+          if (v < nL) {
+            const inner = ctx.getPcb().tracks.filter((t) => /^In/.test(t.layer) && Number(t.layer[2]) > v - 2).length + ctx.getPcb().zones.filter((z) => /^In/.test(z.layer) && Number(z.layer[2]) > v - 2).length;
+            if (inner) ctx.toast(`使えなくなった内層に配線・ベタが ${inner} 個あります（DRC で表示）`, true);
+          }
+        } else {
+          ctx.mutate((q) => { q.board.fab = adaptFab({ ...q.board.fab, [name]: v }, nL); }, 'fab');
+        }
+        render();
+      };
+    });
   }
 
   function bindCommon() {

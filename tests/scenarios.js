@@ -131,7 +131,7 @@ export const SPECS = {
 const now = () => (globalThis.performance ? performance.now() : Date.now());
 
 /** 通しの実行。各工程の結果と時間（ms）を返す */
-export async function runPipeline(M, key, { boards = 5 } = {}) {
+export async function runPipeline(M, key, { boards = 5, layers = 2 } = {}) {
   const spec = SPECS[key];
   const t = {};
   const lap = async (name, fn) => { const s = now(); const r = await fn(); t[name] = Math.round((now() - s) * 10) / 10; return r; };
@@ -140,6 +140,7 @@ export async function runPipeline(M, key, { boards = 5 } = {}) {
   prj.netlist = nl;
   const erc = await lap('erc', () => M.erc.runErc(prj));
   const pcb = M.pcb.ensurePcb(prj);
+  pcb.settings.layers = layers;
   const resolve = (c) => { const part = prj.library.parts.find((p) => p.id === c.partId); return (part && M.parts.partFootprint(part)) || M.fps.getFootprint(c.footprint); };
   await lap('import', () => M.pcb.importNetlist(pcb, nl, resolve));
   // 基板の大きさ: 部品の外形枠の面積の 3 倍を目安に、縦横比 4:3、5mm 単位
@@ -148,6 +149,12 @@ export async function runPipeline(M, key, { boards = 5 } = {}) {
   M.pcb.setOutlineRect(pcb, w, h);
   const arranged = await lap('arrange', () => M.pcb.arrangeInBoard(pcb));
   M.pcb.addBoardZone(pcb, 'B.Cu', 'GND');
+  if (layers >= 4) {
+    // 内層: GND と電源の面
+    M.pcb.addBoardZone(pcb, 'In1.Cu', 'GND');
+    const pw = nl.nets.map((n) => n.name).find((n) => /^\+|VBUS|VCC/.test(n));
+    if (pw) M.pcb.addBoardZone(pcb, 'In2.Cu', pw);
+  }
   const fills = await lap('zoneFill', () => M.zonefill.fillAllZones(pcb, M.drc.drcRules(prj)));
   const drc = await lap('drc', () => M.drc.runDrc(prj, pcb));
   const plot = await lap('plot', () => M.plot.buildPlot(prj, pcb));

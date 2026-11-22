@@ -10,9 +10,9 @@ import {
 } from './model.js';
 import { computeConnectivity } from './connectivity.js';
 import { renderSheet, symbolPreviewSVG } from './render.js';
+import { esc } from '../core/util.js';
 
 const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export const MODE_TOOLS = ['select', 'place', 'wire', 'label', 'power'];
 

@@ -2,7 +2,7 @@
 // 保存形式: 独自JSON。schemaVersion でマイグレーションする。
 
 export const FORMAT_ID = 'pocket-eda-project';
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** 衝突しにくいID（crypto.randomUUID が無い環境でも動く） */
 export function newId(prefix = 'id') {
@@ -12,21 +12,15 @@ export function newId(prefix = 'id') {
   return `${prefix}_${rnd}`;
 }
 
-/** 既定の基板設定（JLCPCB 標準2層の一般的な値。DRCで使う） */
+/**
+ * 既定の基板設定。
+ *  fab:   製造仕様（板厚・銅厚・色・表面処理など。層数は pcb.settings.layers が持つ）
+ *  rules: 利用者が変えた設計ルールだけ（既定値は check/rules.js が層数に応じて決める）
+ */
 export function defaultBoardSettings() {
   return {
-    layers: 2,
-    thicknessMm: 1.6,
-    copperOz: 1,
-    units: 'mm',
-    // PCB内部座標は nm 整数で保持する（第4段階以降）
-    rules: {
-      minTrackWidthMm: 0.127,
-      minClearanceMm: 0.127,
-      minViaDrillMm: 0.3,
-      minViaDiameterMm: 0.6,
-      boardEdgeClearanceMm: 0.3,
-    },
+    fab: { thicknessMm: 1.6, stackup: null, outerCopperOz: 1, innerCopperOz: 0.5, maskColor: 'green', silkColor: 'white', finish: 'LeadFreeHASL', viaProcess: 'tented' },
+    rules: {},
   };
 }
 
@@ -61,7 +55,21 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
  * 旧バージョンのJSONを現行スキーマへ変換する。
  * 現在は v1 のみ。将来 v2 を作るときは migrations[1] = (p) => {...; p.schemaVersion = 2}
  */
-const migrations = {};
+const migrations = {
+  // v1 → v2: 基板設定を「製造仕様(fab)」と「利用者が変えたルールだけ(rules)」に分ける。層数は PCB 設定へ
+  1: (p) => {
+    const b = isObj(p.board) ? p.board : {};
+    const OLD_DEFAULTS = { minTrackWidthMm: 0.127, minClearanceMm: 0.127, minViaDrillMm: 0.3, minViaDiameterMm: 0.6, boardEdgeClearanceMm: 0.3 };
+    const rules = {};
+    for (const [k, v] of Object.entries(isObj(b.rules) ? b.rules : {})) if (OLD_DEFAULTS[k] !== v) rules[k] = v;
+    const fab = { ...defaultBoardSettings().fab, ...(isObj(b.fab) ? b.fab : {}) };
+    if (Number.isFinite(b.thicknessMm)) fab.thicknessMm = b.thicknessMm;
+    if (Number.isFinite(b.copperOz)) fab.outerCopperOz = b.copperOz;
+    const layers = [2, 4, 6].includes(b.layers) ? b.layers : 2;
+    if (isObj(p.pcb) && isObj(p.pcb.settings) && !p.pcb.settings.layers) p.pcb.settings.layers = layers;
+    return { ...p, board: { fab, rules }, schemaVersion: 2 };
+  },
+};
 
 export function migrate(data) {
   let p = data;
@@ -101,7 +109,7 @@ export function normalizeProject(data) {
     schematic: isObj(p.schematic) && Array.isArray(p.schematic.sheets) ? p.schematic : base.schematic,
     library: isObj(p.library) && Array.isArray(p.library.parts) ? p.library : base.library,
     pcb: isObj(p.pcb) ? { ...base.pcb, ...p.pcb } : base.pcb,
-    board: isObj(p.board) ? { ...base.board, ...p.board, rules: { ...base.board.rules, ...(p.board.rules || {}) } } : base.board,
+    board: isObj(p.board) ? { fab: { ...base.board.fab, ...(p.board.fab || {}) }, rules: { ...(p.board.rules || {}) } } : base.board,
     checks: isObj(p.checks) ? { ...base.checks, ...p.checks } : base.checks,
     settings: isObj(p.settings) ? { ...base.settings, ...p.settings } : base.settings,
   };

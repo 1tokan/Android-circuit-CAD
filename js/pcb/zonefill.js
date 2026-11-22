@@ -9,6 +9,7 @@
 import pc from '../vendor/polygon-clipping.js';
 import { allPads, toMm, boardRect, fpToBoard } from './model.js';
 import { hash } from '../netlist/netlist.js';
+import { pointInRing as inRing } from '../core/geom2d.js';
 import { withDefaults } from '../check/rules.js';
 
 const SEG = 24; // 円の分割数
@@ -72,14 +73,6 @@ export function padPoly(inst, pad, d) {
 }
 
 // ---------- 点と多角形 ----------
-function inRing(p, ring) {
-  let ins = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) ins = !ins;
-  }
-  return ins;
-}
 /** 点が「穴あき多角形」（[外周, 穴...]）の内側か */
 export function pointInPolyWithHoles(p, poly) {
   if (!inRing(p, poly[0])) return false;

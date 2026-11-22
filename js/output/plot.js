@@ -12,18 +12,15 @@
 //  { t:'region', rings:[[x,y]...], dark, fn }    … ベタ（外周は dark、穴は clear で抜く）
 // fn: X2 の .AperFunction（Conductor / SMDPad,CuDef / ComponentPad / ViaPad / Profile / NonConductor など）
 
-import { allPads, toMm, boardRect, fpToBoard } from '../pcb/model.js';
-import { silkSegments, pin1Mark, silkTexts } from '../pcb/shapes.js';
+import { allPads, toMm, boardRect, fpToBoard, copperLayers, layerName } from '../pcb/model.js';
+import { silkSegments, pin1Mark, silkTexts, ROUNDRECT_RATIO } from '../pcb/shapes.js';
 import { SILK_LINE_MM } from '../pcb/text.js';
 import { cachedFills, ringArea } from '../pcb/zonefill.js';
 import { drcRules } from '../check/drc.js';
 
-export const ROUNDRECT_RATIO = 0.25; // 角丸パッドの角の半径 = 短辺 × 0.25（画面の描画と同じ）
 export const EDGE_LINE_MM = 0.05;
 
-export const LAYERS = [
-  { id: 'F.Cu', name: '表 銅箔', ext: 'gtl', func: 'Copper,L1,Top', polarity: 'Positive' },
-  { id: 'B.Cu', name: '裏 銅箔', ext: 'gbl', func: 'Copper,L2,Bot', polarity: 'Positive' },
+const NON_COPPER = [
   { id: 'F.Mask', name: '表 レジスト（開口）', ext: 'gts', func: 'Soldermask,Top', polarity: 'Negative' },
   { id: 'B.Mask', name: '裏 レジスト（開口）', ext: 'gbs', func: 'Soldermask,Bot', polarity: 'Negative' },
   { id: 'F.SilkS', name: '表 シルク', ext: 'gto', func: 'Legend,Top', polarity: 'Positive' },
@@ -32,6 +29,23 @@ export const LAYERS = [
   { id: 'B.Paste', name: '裏 メタルマスク', ext: 'gbp', func: 'Paste,Bot', polarity: 'Positive' },
   { id: 'Edge.Cuts', name: '基板外形', ext: 'gm1', func: 'Profile,NP', polarity: 'Positive' },
 ];
+
+/**
+ * 層数に応じた Gerber の層の一覧。内層は JLCPCB が認識する .g1 .g2 …（表側から順）
+ */
+export function layerDefs(layers = 2) {
+  const cu = copperLayers(layers);
+  const copper = cu.map((id, i) => ({
+    id,
+    name: `${layerName(id)} 銅箔（L${i + 1}）`,
+    ext: id === 'F.Cu' ? 'gtl' : id === 'B.Cu' ? 'gbl' : `g${i}`,
+    func: id === 'F.Cu' ? 'Copper,L1,Top' : id === 'B.Cu' ? `Copper,L${layers},Bot` : `Copper,L${i + 1},Inr`,
+    polarity: 'Positive',
+  }));
+  return [...copper, ...NON_COPPER];
+}
+/** 2層の一覧（後方互換） */
+export const LAYERS = layerDefs(2);
 
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
 const near90 = (deg) => { const m = ((deg % 90) + 90) % 90; return m < 1e-6 || 90 - m < 1e-6; };
@@ -68,17 +82,22 @@ export function padAperture(inst, pad, grow = 0) {
  * 製造データの図形一覧を作る
  * @returns {{ layers: Object<string, prim[]>, drills: { pth:[{x,y,d,fn}], npth:[{x,y,d}] }, board, notes:[string], options }}
  */
-export function buildPlot(project, pcb, { tentVias = true } = {}) {
+export function buildPlot(project, pcb, opt = {}) {
   const R = drcRules(project);
+  const fab = project.board?.fab || {};
+  // ビアの処理: 覆う（テンティング）・穴埋め・充填はレジストを開けない。開口のときだけ開ける
+  const tentVias = opt.tentVias ?? (fab.viaProcess || 'tented') !== 'untented';
+  const nLayers = pcb.settings?.layers || 2;
+  const defs = layerDefs(nLayers);
   const mask = R.maskExpansionMm ?? 0.05;
-  const L = Object.fromEntries(LAYERS.map((l) => [l.id, []]));
+  const L = Object.fromEntries(defs.map((l) => [l.id, []]));
   const notes = [];
 
   // ---- ベタ（銅箔の一番下に置く。あとから描く配線・パッドが上に重なる） ----
   const { fills } = cachedFills(pcb, R);
   for (const z of pcb.zones) {
     const f = fills.get(z.id);
-    if (!f) continue;
+    if (!f || !L[z.layer]) continue; // 層数を減らして無くなった層（DRC でエラー）
     // 外周の面積が大きい順（穴の中の島は、穴を抜いた後に描かれる）
     const polys = [...f.polygons].sort((a, b) => Math.abs(ringArea(b[0])) - Math.abs(ringArea(a[0])));
     for (const poly of polys) {
@@ -88,6 +107,7 @@ export function buildPlot(project, pcb, { tentVias = true } = {}) {
   }
   // ---- 配線 ----
   for (const t of pcb.tracks) {
+    if (!L[t.layer]) continue; // 層数を減らして無くなった層（DRC でエラー）
     L[t.layer].push({ t: 'line', a: { x: toMm(t.a.x), y: toMm(t.a.y) }, b: { x: toMm(t.b.x), y: toMm(t.b.y) }, w: toMm(t.width), fn: 'Conductor' });
   }
   // ---- パッド ----
@@ -97,6 +117,7 @@ export function buildPlot(project, pcb, { tentVias = true } = {}) {
     const at = { x: p.x, y: p.y };
     for (const cu of p.layers) {
       L[cu].push({ t: 'flash', ap: padAperture(p.inst, p.pad), at, fn: smd ? 'SMDPad,CuDef' : 'ComponentPad' });
+      if (cu !== 'F.Cu' && cu !== 'B.Cu') continue; // 内層にはレジスト・メタルマスクが無い
       const side = cu === 'F.Cu' ? 'F' : 'B';
       L[`${side}.Mask`].push({ t: 'flash', ap: padAperture(p.inst, p.pad, mask), at, fn: smd ? 'SMDPad,CuDef' : 'ComponentPad' });
       if (smd && !p.inst.dnp) L[`${side}.Paste`].push({ t: 'flash', ap: padAperture(p.inst, p.pad), at, fn: 'SMDPad,CuDef' });
@@ -106,7 +127,7 @@ export function buildPlot(project, pcb, { tentVias = true } = {}) {
   // ---- ビア ----
   for (const v of pcb.vias) {
     const at = { x: toMm(v.x), y: toMm(v.y) };
-    for (const cu of ['F.Cu', 'B.Cu']) L[cu].push({ t: 'flash', ap: { kind: 'C', d: toMm(v.diameter) }, at, fn: 'ViaPad' });
+    for (const cu of copperLayers(pcb)) L[cu].push({ t: 'flash', ap: { kind: 'C', d: toMm(v.diameter) }, at, fn: 'ViaPad' });
     if (!tentVias) for (const m of ['F.Mask', 'B.Mask']) L[m].push({ t: 'flash', ap: { kind: 'C', d: toMm(v.diameter) + 2 * mask }, at, fn: 'ViaPad' });
     pthDrills.push({ x: at.x, y: at.y, d: toMm(v.drill), fn: 'ViaDrill' });
   }
@@ -136,9 +157,11 @@ export function buildPlot(project, pcb, { tentVias = true } = {}) {
   for (let i = 0; i < 4; i++) L['Edge.Cuts'].push({ t: 'line', a: corners[i], b: corners[(i + 1) % 4], w: EDGE_LINE_MM, fn: 'Profile' });
 
   if (pcb.footprints.some((f) => f.dnp)) notes.push('未実装（DNP）の部品はメタルマスクを開けていません');
-  if (tentVias) notes.push('ビアはレジストで覆っています（テンティング）');
+  if (tentVias) notes.push('ビアはレジストの開口なし（製造仕様のビア処理に従う）');
   return {
     layers: L,
+    layerDefs: defs,
+    layerCount: nLayers,
     drills: { pth: pthDrills, npth },
     board: { ...br, w: br.x1 - br.x0, h: br.y1 - br.y0 },
     notes,

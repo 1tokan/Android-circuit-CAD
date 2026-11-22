@@ -75,14 +75,14 @@ await step('名前変更→自動保存→再読込で復元', async () => {
 await step('アプリ切替（非表示）時に即保存される', async () => {
   await page.evaluate(() => {
     window.pocketEDA.state.saver.delay = 60000; // タイマーでは保存されない状態にする
-    window.pocketEDA.mutateProject((p) => { p.board.thicknessMm = 1.0; });
+    window.pocketEDA.mutateProject((p) => { p.board.fab.thicknessMm = 1.0; });
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await page.waitForFunction(() => document.querySelector('#save-state').dataset.state === 'saved', null, { timeout: 3000 });
   await page.reload();
   await ready();
-  const t = await page.evaluate(() => window.pocketEDA.state.project.board.thicknessMm);
+  const t = await page.evaluate(() => window.pocketEDA.state.project.board.fab.thicknessMm);
   assert.equal(t, 1.0);
 });
 
@@ -96,7 +96,7 @@ await step('JSON書き出し: 正しい形式のファイル', async () => {
   const j = JSON.parse(fs.readFileSync(exportedPath, 'utf8'));
   assert.equal(j.format, 'pocket-eda-project');
   assert.equal(j.name, 'LED点灯回路A');
-  assert.equal(j.board.thicknessMm, 1.0);
+  assert.equal(j.board.fab.thicknessMm, 1.0);
   assert.equal(j.checks.drc, null);
 });
 

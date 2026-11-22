@@ -107,3 +107,14 @@ export function nearestPoint(s, t) {
   }
   return best.p;
 }
+
+/** 点が多角形の内側か（頂点は {x,y} でも [x,y] でもよい。偶奇規則） */
+export function pointInRing(p, ring) {
+  let ins = false;
+  const X = (q) => (Array.isArray(q) ? q[0] : q.x), Y = (q) => (Array.isArray(q) ? q[1] : q.y);
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = X(ring[i]), yi = Y(ring[i]), xj = X(ring[j]), yj = Y(ring[j]);
+    if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) ins = !ins;
+  }
+  return ins;
+}

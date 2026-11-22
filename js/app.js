@@ -22,6 +22,7 @@ import { ercStatus } from './check/erc.js';
 import { drcStatus } from './check/drc.js';
 import { createOutputView } from './output/view.js';
 import { moduleById } from './modules/registry.js';
+import { esc } from './core/util.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '0.8.1';
@@ -447,6 +448,17 @@ function renderCanvas() {
   renderMarker();
 }
 
+/** 3D 表示（three.js は重いので開くときに読み込む） */
+async function open3d() {
+  try {
+    const { openViewer3d } = await import('./view3d/viewer.js');
+    await openViewer3d({ root: $('#viewer3d'), project: state.project, pcb: ensurePcb(state.project), onClose: () => {} });
+  } catch (e) {
+    console.error(e);
+    toast('3D 表示を開けませんでした: ' + (e?.message || e), true);
+  }
+}
+
 /** 検査結果の位置の印（画面上で一定の大きさ） */
 function renderMarker() {
   const g = $('#check-marker');
@@ -622,7 +634,6 @@ function toast(msg, isError = false) {
   toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 5000 : 2200);
 }
 
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function fmtTime(t) {
   const d = new Date(t);
   const z = (n) => String(n).padStart(2, '0');
@@ -791,6 +802,8 @@ async function boot() {
     toast, ask, download, fmtTime,
     runDrc: () => state.checkView.run('drc', { quiet: true }),
     editPcb: (fn, label) => editPcb(fn, label),
+    mutate: (fn, reason) => mutateProject(fn, reason),
+    open3d: () => open3d(),
   });
   state.partsView = createPartsView({
     root: $('#parts-view'),

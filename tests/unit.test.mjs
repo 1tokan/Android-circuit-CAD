@@ -27,15 +27,25 @@ test('シリアライズ→パースで完全に一致（往復）', () => {
   assert.deepEqual(back, p);
 });
 
-test('欠けた項目は既定値で補完、既存値は保持', () => {
+test('欠けた項目は既定値で補完、既存値は保持（ルールは変えた値だけを持つ）', () => {
   const p = createProject('補完');
   delete p.pcb.vias;
-  delete p.board.rules.minViaDrillMm;
+  delete p.board.fab.maskColor;
   p.board.rules.minClearanceMm = 0.2;
   const n = normalizeProject(JSON.parse(JSON.stringify(p)));
   assert.deepEqual(n.pcb.vias, []);
-  assert.equal(n.board.rules.minViaDrillMm, 0.3);
-  assert.equal(n.board.rules.minClearanceMm, 0.2);
+  assert.equal(n.board.fab.maskColor, 'green');
+  assert.deepEqual(n.board.rules, { minClearanceMm: 0.2 });
+});
+
+test('v1 → v2: 旧既定値のコピーは捨て、利用者が変えた値と板厚・層数は引き継ぐ', () => {
+  const v1 = { ...createProject('旧'), schemaVersion: 1, board: { layers: 4, thicknessMm: 1.2, copperOz: 2, units: 'mm', rules: { minTrackWidthMm: 0.127, minClearanceMm: 0.15, minViaDrillMm: 0.3, minViaDiameterMm: 0.6, boardEdgeClearanceMm: 0.3 } }, pcb: { version: 2, settings: { grid: 250000 }, outline: { type: 'rect', x: 0, y: 0, w: 1, h: 1 }, footprints: [], tracks: [], vias: [], zones: [], texts: [], holes: [] } };
+  const n = normalizeProject(JSON.parse(JSON.stringify(v1)));
+  assert.equal(n.schemaVersion, 2);
+  assert.deepEqual(n.board.rules, { minClearanceMm: 0.15 });
+  assert.equal(n.board.fab.thicknessMm, 1.2);
+  assert.equal(n.board.fab.outerCopperOz, 2);
+  assert.equal(n.pcb.settings.layers, 4);
 });
 
 test('不正なファイルは例外（黙って空にしない）', () => {

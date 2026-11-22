@@ -326,7 +326,7 @@ button { font: inherit; color: inherit; }
 .pv-online-head .note { flex: 1; margin: 0; }
 
 /* ================= 第4段階: PCB ================= */
-#pcb-content { --fcu: #c83a3a; --bcu: #3b6fd6; --tht: #c9a227; --silk: #e8e8e8; --edge: #e8d34a; --sel: #ffffff; }
+#pcb-content { --fcu: #c83a3a; --bcu: #3b6fd6; --in1: #3fb67a; --in2: #b55bd6; --in3: #d98c2b; --in4: #2fb5c9; --tht: #c9a227; --silk: #e8e8e8; --edge: #e8d34a; --sel: #ffffff; }
 #pcb-content .board { fill: #0f2a1e; }
 #pcb-content .edge { fill: none; stroke: var(--edge); stroke-width: 0.15; }
 #pcb-content .track { stroke-linecap: round; opacity: .55; }
@@ -430,3 +430,25 @@ button { font: inherit; color: inherit; }
 .tbl a { color: var(--accent); }
 .tbl .small-btn { padding: 4px 8px; min-height: 32px; margin: 0 2px; }
 .chips.seg .chip { flex: 1; }
+
+/* 内層（4・6層） */
+#pcb-content .track.in1, #pcb-content .route-preview.in1 { stroke: var(--in1); }
+#pcb-content .zone.in1 { fill: var(--in1); stroke: var(--in1); }
+#pcb-content .zone-fill.in1 { fill: var(--in1); }
+#pcb-content .track.in2, #pcb-content .route-preview.in2 { stroke: var(--in2); }
+#pcb-content .zone.in2 { fill: var(--in2); stroke: var(--in2); }
+#pcb-content .zone-fill.in2 { fill: var(--in2); }
+#pcb-content .track.in3, #pcb-content .route-preview.in3 { stroke: var(--in3); }
+#pcb-content .zone.in3 { fill: var(--in3); stroke: var(--in3); }
+#pcb-content .zone-fill.in3 { fill: var(--in3); }
+#pcb-content .track.in4, #pcb-content .route-preview.in4 { stroke: var(--in4); }
+#pcb-content .zone.in4 { fill: var(--in4); stroke: var(--in4); }
+#pcb-content .zone-fill.in4 { fill: var(--in4); }
+
+/* ---- 製造仕様 ---- */
+.fab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; margin: 8px 0; }
+.fab-grid .field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.fab-grid select { min-height: 40px; background: var(--bg3); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; border: 1px solid var(--line); }
+.order-sheet { white-space: pre-wrap; font-size: 11.5px; background: var(--bg3); padding: 8px; border-radius: 8px; overflow-wrap: anywhere; }
+.rule-row.changed span { color: var(--accent); font-weight: 600; }

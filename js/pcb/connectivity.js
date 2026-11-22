@@ -9,13 +9,8 @@
 
 import { allPads, pointInPad, distToSeg, toMm } from './model.js';
 import { cachedFills, pointInPolyWithHoles } from './zonefill.js';
+import { DSU } from '../core/util.js';
 
-class DSU {
-  constructor() { this.p = new Map(); }
-  add(a) { if (!this.p.has(a)) this.p.set(a, a); }
-  find(a) { let r = a; while (this.p.get(r) !== r) r = this.p.get(r); while (this.p.get(a) !== r) { const n = this.p.get(a); this.p.set(a, r); a = n; } return r; }
-  union(a, b) { const x = this.find(a), y = this.find(b); if (x !== y) this.p.set(x, y); }
-}
 
 const mm = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
 const EPS = 1e-4; // 0.1µm

@@ -10,7 +10,7 @@ import { generateNetlist } from '../js/netlist/netlist.js';
 import { ensurePcb, importNetlist, allPads, addTrackPath, addVia, addHole, addText, toNm, toMm, setOutlineRect } from '../js/pcb/model.js';
 import { runErc, ercStatus, ERC_RULES } from '../js/check/erc.js';
 import { runDrc, drcStatus, DRC_RULES } from '../js/check/drc.js';
-import { shapeDist, segSegDist } from '../js/check/geom2d.js';
+import { shapeDist, segSegDist } from '../js/core/geom2d.js';
 import { padShape, silkSegments } from '../js/pcb/shapes.js';
 import { pinPositions } from '../js/schematic/connectivity.js';
 
@@ -285,7 +285,7 @@ test('DRC: ルールはプロジェクトの設定で変えられる', () => {
 });
 
 test('形状: 指摘位置は交点・最も近い所', async () => {
-  const { nearestPoint } = await import('../js/check/geom2d.js');
+  const { nearestPoint } = await import('../js/core/geom2d.js');
   const cap = (x1, y1, x2, y2, r) => ({ type: 'cap', a: { x: x1, y: y1 }, b: { x: x2, y: y2 }, r });
   assert.deepEqual(nearestPoint(cap(0, 5, 20, 5, 0.15), cap(12, 0, 12, 10, 0.15)), { x: 12, y: 5 });
   const p = nearestPoint(cap(0, 0, 10, 0, 0.1), cap(4, 1, 4, 9, 0.1));

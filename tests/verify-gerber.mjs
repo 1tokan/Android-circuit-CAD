@@ -23,7 +23,7 @@ console.log('files:', names.join(', '));
 // 1
 const wtg = require('whats-that-gerber');
 const types = wtg(names);
-const expect = { gtl: ['copper', 'top'], gbl: ['copper', 'bottom'], gts: ['soldermask', 'top'], gbs: ['soldermask', 'bottom'], gto: ['silkscreen', 'top'], gbo: ['silkscreen', 'bottom'], gtp: ['solderpaste', 'top'], gbp: ['solderpaste', 'bottom'], gm1: ['outline', 'all'], drl: ['drill', 'all'] };
+const expect = { g1: ['copper', 'inner'], g2: ['copper', 'inner'], g3: ['copper', 'inner'], g4: ['copper', 'inner'], gtl: ['copper', 'top'], gbl: ['copper', 'bottom'], gts: ['soldermask', 'top'], gbs: ['soldermask', 'bottom'], gto: ['silkscreen', 'top'], gbo: ['silkscreen', 'bottom'], gtp: ['solderpaste', 'top'], gbp: ['solderpaste', 'bottom'], gm1: ['outline', 'all'], drl: ['drill', 'all'] };
 for (const n of names) {
   const e = expect[n.split('.').pop()];
   assert.deepEqual([types[n].type, types[n].side], e, n);

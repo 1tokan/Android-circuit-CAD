@@ -2,15 +2,17 @@
 // 結果はプロジェクトの checks.erc / checks.drc に保存し、回路図・PCB が変わったら「古い結果」と表示する。
 
 import { runErc, ercStatus } from './erc.js';
-import { runDrc, drcStatus, drcRules, DRC_DEFAULTS } from './drc.js';
+import { runDrc, drcStatus } from './drc.js';
+import { drcRules, baseRules, layerCount } from './rules.js';
+import { esc } from '../core/util.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const RULE_LABELS = {
   minTrackWidthMm: '最小配線幅', minClearanceMm: '最小間隔（銅どうし）', minPadClearanceMm: '最小間隔（パッド-配線/ビア）',
   boardEdgeClearanceMm: '基板外形と銅', minViaDrillMm: 'ビア最小穴径', minViaDiameterMm: 'ビア最小外径', minViaAnnularMm: 'ビア最小ランド幅',
   minAnnularRingMm: 'スルーホールパッド最小ランド幅', minPthDrillMm: 'スルーホール最小穴径', maxDrillMm: '最大穴径',
   minHoleToHoleMm: '穴どうし（異なるネット）', minNpthToCopperMm: '取付穴と銅', minSilkToPadMm: 'シルクとパッド',
+  innerEdgeClearanceMm: '基板外形と銅（内層）', minMaskBridgeMm: 'レジストの最小ブリッジ幅',
   minSilkWidthMm: 'シルク最小線幅', minSilkTextHeightMm: 'シルク文字の最小高さ', maskExpansionMm: 'レジスト開口の広げ幅',
 };
 
@@ -37,18 +39,19 @@ export function createCheckView(ctx) {
 
   async function editRules() {
     const p = ctx.getProject();
-    const R = drcRules(p);
-    const rows = Object.keys(DRC_DEFAULTS).map((k) => `<label class="rule-row"><span>${esc(RULE_LABELS[k] || k)}</span><input type="number" step="0.001" min="0" inputmode="decimal" data-rule="${k}" value="${R[k]}"><small>mm</small></label>`).join('');
-    const pr = ctx.ask('DRCルール（mm）', `<p class="note">既定値は JLCPCB 1〜2層標準品の製造能力に合わせています。発注先の仕様に合わせて変更してください。</p><div class="rules">${rows}</div>`,
+    const n = layerCount(p);
+    const base = baseRules(n), R = drcRules(p);
+    const rows = Object.keys(base).map((k) => `<label class="rule-row${R[k] !== base[k] ? ' changed' : ''}"><span>${esc(RULE_LABELS[k] || k)}</span><input type="number" step="0.001" min="0" inputmode="decimal" data-rule="${k}" value="${R[k]}"><small>mm</small></label>`).join('');
+    const pr = ctx.ask(`DRCルール（${n}層・mm）`, `<p class="note">既定値は JLCPCB ${n >= 4 ? '4・6層' : '1・2層'}標準品の製造能力です。層数を変えると既定値も変わります。変えた値だけを保存します（色付きの行）。</p><div class="rules">${rows}</div>`,
       [{ label: 'キャンセル', value: '' }, { label: '既定に戻す', value: 'reset' }, { label: '保存', value: 'ok', cls: 'primary' }]);
     const inputs = [...document.querySelectorAll('#dialog-body [data-rule]')];
     const r = await pr;
-    if (r === 'reset') { ctx.mutate((q) => { q.board.rules = { ...q.board.rules, ...DRC_DEFAULTS }; }, 'rules'); ctx.toast('既定のルールに戻しました'); }
+    if (r === 'reset') { ctx.mutate((q) => { q.board.rules = {}; }, 'rules'); ctx.toast('既定のルールに戻しました'); }
     if (r === 'ok') {
-      const vals = {};
-      for (const el of inputs) { const v = Number(el.value); if (Number.isFinite(v) && v >= 0) vals[el.dataset.rule] = v; }
-      ctx.mutate((q) => { q.board.rules = { ...q.board.rules, ...vals }; }, 'rules');
-      ctx.toast('ルールを保存しました');
+      const over = {};
+      for (const el of inputs) { const v = Number(el.value); if (Number.isFinite(v) && v >= 0 && v !== base[el.dataset.rule]) over[el.dataset.rule] = v; }
+      ctx.mutate((q) => { q.board.rules = over; }, 'rules');
+      ctx.toast(Object.keys(over).length ? `変えた値 ${Object.keys(over).length} 件を保存しました` : '既定値のままです');
     }
     render();
   }
@@ -84,7 +87,7 @@ export function createCheckView(ctx) {
   function coverage(r) {
     const checked = r.checked.map((c) => `<li><span>${c.count ? `<b class="${r.issues.some((i) => i.rule === c.id && i.level === 'error') ? 'err' : 'warn'}">${c.count}件</b>` : '<span class="ok">✓</span>'}</span>${esc(c.label)}</li>`).join('');
     const un = r.unchecked.map((u) => `<li>${esc(u)}</li>`).join('');
-    const rules = st.tab === 'drc' && r.rules ? `<details><summary>使ったルール値</summary><ul class="cover">${Object.keys(DRC_DEFAULTS).map((k) => `<li><span>${r.rules[k]}mm</span>${esc(RULE_LABELS[k] || k)}</li>`).join('')}</ul></details>` : '';
+    const rules = st.tab === 'drc' && r.rules ? `<details><summary>使ったルール値</summary><ul class="cover">${Object.keys(r.rules).map((k) => `<li><span>${r.rules[k]}mm</span>${esc(RULE_LABELS[k] || k)}</li>`).join('')}</ul></details>` : '';
     return `<details open><summary>検査した項目（${r.checked.length}）</summary><ul class="cover">${checked}</ul></details>
       <details open><summary>検査していない項目（${r.unchecked.length}）</summary><ul class="uncovered">${un}</ul></details>${rules}`;
   }

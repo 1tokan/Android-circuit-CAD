@@ -2,7 +2,7 @@
 // 仕様: The Gerber Layer Format Specification (Ucamco) Revision 2024.05 に沿う。
 // 単位 mm、座標形式 4.6（%FSLAX46Y46*%）。Y は基板座標（下向き）を反転して上向きにする。
 
-import { LAYERS } from './plot.js';
+import { layerDefs } from './plot.js';
 
 /** 小数（末尾の0を省く。-0 は 0） */
 const dec = (v, n) => { const r = Math.round(v * 10 ** n) / 10 ** n; if (r === 0) return '0'; const s = r.toFixed(n); return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s; };
@@ -128,13 +128,13 @@ export function writeGerberLayer(layer, prims, meta) {
  * Excellon ドリル（KiCad と同じ「METRIC・小数表記」）
  * @param holes [{x,y,d}]  @param plated true=メッキ穴(PTH) / false=非メッキ(NPTH)
  */
-export function writeExcellon(holes, plated, meta) {
+export function writeExcellon(holes, plated, meta, layers = 2) {
   const sizes = [...new Set(holes.map((h) => Math.round(h.d * 1000) / 1000))].sort((a, b) => a - b);
   const out = [
     'M48',
     `; DRILL file {Pocket EDA ${meta.version}} date ${meta.date}`,
     '; FORMAT={-:-/ absolute / metric / decimal}',
-    `; #@! TF.FileFunction,${plated ? 'Plated,1,2,PTH' : 'NonPlated,1,2,NPTH'}`,
+    `; #@! TF.FileFunction,${plated ? `Plated,1,${layers},PTH` : `NonPlated,1,${layers},NPTH`}`,
     'FMAT,2',
     'METRIC',
   ];
@@ -155,14 +155,14 @@ export function gerberFiles(plot, { project = 'board', version = '0', date = new
   const base = String(project).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60) || 'board';
   const meta = { version, date: isoLocal(date), project };
   const files = [];
-  for (const l of LAYERS) {
+  for (const l of plot.layerDefs || layerDefs(plot.layerCount || 2)) {
     const prims = plot.layers[l.id];
     // メタルマスクで何も無い面は出さない（裏に部品が無い場合など）
     if (/Paste/.test(l.id) && !prims.length) continue;
     files.push({ name: `${base}-${l.id.replace('.', '_')}.${l.ext}`, layer: l.id, content: writeGerberLayer(l, prims, meta) });
   }
-  files.push({ name: `${base}-PTH.drl`, layer: 'PTH', content: writeExcellon(plot.drills.pth, true, meta) });
-  if (plot.drills.npth.length) files.push({ name: `${base}-NPTH.drl`, layer: 'NPTH', content: writeExcellon(plot.drills.npth, false, meta) });
+  files.push({ name: `${base}-PTH.drl`, layer: 'PTH', content: writeExcellon(plot.drills.pth, true, meta, plot.layerCount || 2) });
+  if (plot.drills.npth.length) files.push({ name: `${base}-NPTH.drl`, layer: 'NPTH', content: writeExcellon(plot.drills.npth, false, meta, plot.layerCount || 2) });
   return files;
 }
 

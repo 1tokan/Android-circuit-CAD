@@ -4,18 +4,19 @@
 //
 // 既定値は JLCPCB の 1〜2 層標準品の製造能力（2026年11月確認）に合わせる。プロジェクトの board.rules で上書きできる。
 
-import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg } from '../pcb/model.js';
+import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg, copperLayers, layerName } from '../pcb/model.js';
 import { computePcbConnectivity } from '../pcb/connectivity.js';
 import { padShape, trackShape, circleShape, silkSegments, silkTexts } from '../pcb/shapes.js';
 import { SILK_LINE_MM, unsupportedChars } from '../pcb/text.js';
 import { fpToBoard } from '../pcb/model.js';
-import { shapeDist, shapeSegDist, shapeBox, boxesNear, shapeCenter, nearestPoint } from './geom2d.js';
+import { shapeDist, shapeSegDist, shapeBox, boxesNear, shapeCenter, nearestPoint, pointInRing } from '../core/geom2d.js';
 import { hash, sourceHash } from '../netlist/netlist.js';
 
 export { DRC_DEFAULTS, drcRules } from './rules.js';
 import { drcRules } from './rules.js';
 
 export const DRC_RULES = [
+  { id: 'layer_missing', label: '層数より外の層（減らした内層）に残った配線・ベタ' },
   { id: 'track_width', label: '配線幅の最小値' },
   { id: 'via_size', label: 'ビアの外径・穴径・ランド幅' },
   { id: 'pad_drill', label: 'スルーホールパッドの穴径・ランド幅' },
@@ -32,6 +33,7 @@ export const DRC_RULES = [
   { id: 'silk_pad', label: 'シルク（部品番号・文字・他部品の外形線）とパッドの重なり（文字幅は推定）' },
   { id: 'silk_outside', label: '基板の外のシルク文字' },
   { id: 'silk_size', label: 'シルク文字の高さ・線幅、出力できない文字（ASCII以外）' },
+  { id: 'mask_bridge', label: 'レジストのブリッジ幅（隣り合うパッドの開口の間に残るレジスト）' },
   { id: 'zone_fill', label: 'ベタの塗りつぶし: 別ネットの銅とのクリアランス（計算結果を独立に再検査）・取り除いた島・空のベタ' },
   { id: 'netlist_sync', label: '回路図（ネットリスト）との一致・未配置の部品' },
   { id: 'footprint_unverified', label: '未照合・自動生成のフットプリント' },
@@ -40,7 +42,6 @@ export const DRC_RULES = [
 
 export const DRC_UNCHECKED = [
   'ベタの細い部分（最小幅）の除去。細いくびれが残ることがあります',
-  'ソルダーマスクのブリッジ幅（狭いピッチのパッド間のレジスト残り）',
   'メタルマスク（ペースト）',
   '銅の細片（スリバー）・鋭角部（アシッドトラップ）',
   '部品の高さ・3D干渉',
@@ -90,9 +91,14 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   }
   for (const v of pcb.vias) {
     const shape = circleShape(v.x, v.y, v.diameter);
-    items.push({ kind: 'via', key: `v:${v.id}`, layers: ['F.Cu', 'B.Cu'], net: v.net || groupNet(`v:${v.id}`) || `~v:${v.id}`, shape, box: shapeBox(shape), label: 'ビア', v });
+    items.push({ kind: 'via', key: `v:${v.id}`, layers: copperLayers(pcb), net: v.net || groupNet(`v:${v.id}`) || `~v:${v.id}`, shape, box: shapeBox(shape), label: 'ビア', v });
   }
   const netName = (n) => (n.startsWith('~') ? 'ネットなし' : n);
+
+  // ---- 層 ----
+  const cuSet = new Set(copperLayers(pcb));
+  for (const t of pcb.tracks) if (!cuSet.has(t.layer)) add('error', 'layer_missing', `配線が無い層 ${t.layer} にあります（層数 ${cuSet.size}）。層を変えるか削除してください`, [], mid(t));
+  for (const z of pcb.zones) if (!cuSet.has(z.layer)) add('error', 'layer_missing', `ベタが無い層 ${z.layer} にあります（層数 ${cuSet.size}）`, [], null);
 
   // ---- 寸法 ----
   for (const t of pcb.tracks) {
@@ -141,6 +147,9 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   }
 
   // ---- 基板外形 ----
+  // 内層の銅は外形からさらに離す（4・6層）
+  const isInner = (l) => /^In\d\.Cu$/.test(l);
+  const edgeNeed = (it) => (it.layers.some(isInner) ? Math.max(R.boardEdgeClearanceMm, R.innerEdgeClearanceMm) : R.boardEdgeClearanceMm);
   for (const it of items) {
     const c = shapeCenter(it.shape);
     let d = Infinity, near = null;
@@ -148,8 +157,8 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     if (!inside(c)) {
       if (it.kind === 'pad') continue; // 部品ごと基板外 → outside_board で報告
       add('error', 'edge_clearance', `${it.label} が基板の外にあります`, it.ref ? [it.ref] : [], c);
-    } else if (d < R.boardEdgeClearanceMm - 1e-6) {
-      add('error', 'edge_clearance', `${it.label} と基板外形の間隔 ${fmt(Math.max(0, d))}mm（最小 ${R.boardEdgeClearanceMm}mm）`, it.ref ? [it.ref] : [], nearestPoint(it.shape, { type: 'cap', a: near[0], b: near[1], r: 0 }));
+    } else if (d < edgeNeed(it) - 1e-6) {
+      add('error', 'edge_clearance', `${it.label} と基板外形の間隔 ${fmt(Math.max(0, d))}mm（最小 ${edgeNeed(it)}mm${it.layers.some(isInner) ? '・内層を含む' : ''}）`, it.ref ? [it.ref] : [], nearestPoint(it.shape, { type: 'cap', a: near[0], b: near[1], r: 0 }));
     }
   }
 
@@ -251,6 +260,30 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     if (hit) add('warning', 'silk_pad', `${f.ref} の外形線のシルクが ${hit.label} のパッドにかかっています`, [f.ref, hit.ref], shapeCenter(hit.shape));
   }
 
+  // ---- レジストのブリッジ（パッドの開口どうしの間に残るレジストの幅） ----
+  // 幅が minMaskBridgeMm 未満だと製造時に取り除かれ、パッドどうしが一つの開口になる（はんだブリッジしやすい）
+  {
+    const e = R.maskExpansionMm;
+    const byRef = new Map();
+    for (const side of ['F.Cu', 'B.Cu']) {
+      const ps = items.filter((it) => it.kind === 'pad' && it.layers.includes(side)).sort((a, b) => a.box.x0 - b.box.x0);
+      for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+        const A = ps[i], B = ps[j];
+        if (B.box.x0 > A.box.x1 + 2 * e + R.minMaskBridgeMm) break;
+        if (A.net === B.net || !boxesNear(A.box, B.box, 2 * e + R.minMaskBridgeMm)) continue;
+        const bridge = shapeDist(A.shape, B.shape) - 2 * e;
+        if (bridge >= R.minMaskBridgeMm - 1e-6) continue;
+        const key = A.ref === B.ref ? A.ref : `${A.ref}/${B.ref}`;
+        const cur = byRef.get(key) || { n: 0, min: Infinity, at: null, refs: [...new Set([A.ref, B.ref])] };
+        cur.n++; if (bridge < cur.min) { cur.min = bridge; cur.at = nearestPoint(A.shape, B.shape); }
+        byRef.set(key, cur);
+      }
+    }
+    for (const [key, v] of byRef) {
+      add('warning', 'mask_bridge', `${key}: パッドの間にレジストが残りません（${v.n} か所、残る幅 ${fmt(Math.max(0, v.min))}mm・最小 ${R.minMaskBridgeMm}mm）。はんだブリッジに注意（細かいピッチの IC では普通にあります）`, v.refs, v.at);
+    }
+  }
+
   // ---- 回路図との一致 ----
   const nl = project.netlist;
   if (!nl) add('warning', 'netlist_sync', 'ネットリストが未生成です。回路図からネットリストを作って取り込んでください', [], null);
@@ -329,14 +362,6 @@ export function drcStatus(project, pcb) {
 function mid(t) { return { x: toMm(t.a.x + t.b.x) / 2, y: toMm(t.a.y + t.b.y) / 2 }; }
 function midPt(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 
-function pointInRing(p, ring) {
-  let ins = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i], [xj, yj] = ring[j];
-    if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) ins = !ins;
-  }
-  return ins;
-}
 function polyBox(poly) {
   const xs = poly.map((q) => toMm(q.x)), ys = poly.map((q) => toMm(q.y));
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };

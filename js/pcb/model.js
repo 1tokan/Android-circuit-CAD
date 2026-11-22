@@ -1,19 +1,34 @@
 // PCB のデータと操作（純粋関数。DOM に依存しない）
 // 保存座標は nm 整数（丸め誤差を製造データに持ち込まない）。計算・表示は mm の実数で行う。
-// 層: 'F.Cu' 表銅 / 'B.Cu' 裏銅 / 'F.SilkS' 'B.SilkS' シルク / 'Edge.Cuts' 外形
+// 層: 'F.Cu' 表銅 / 'In1.Cu'〜'In4.Cu' 内層（4・6層のとき）/ 'B.Cu' 裏銅 / 'F.SilkS' 'B.SilkS' シルク / 'Edge.Cuts' 外形
+// 層数は pcb.settings.layers（2・4・6）。ビアとスルーホールは全層を貫通する（ブラインド・ベリードビアは扱わない）
 
 import { newId } from '../core/project.js';
+import { pointSegDist as distToSeg, pointInRing as pointInPolygon } from '../core/geom2d.js';
 
 export const NM = 1e6;
 export const toNm = (mm) => Math.round(Number(mm) * NM);
 export const toMm = (nm) => nm / NM;
-export const COPPER = ['F.Cu', 'B.Cu'];
+/** 銅箔層の一覧（表から裏の順） */
+export function copperLayers(pcbOrCount) {
+  const n = typeof pcbOrCount === 'number' ? pcbOrCount : pcbOrCount?.settings?.layers || 2;
+  return ['F.Cu', ...Array.from({ length: Math.max(0, n - 2) }, (_, i) => `In${i + 1}.Cu`), 'B.Cu'];
+}
+/** 層の表示名 */
+export function layerName(layer) {
+  return layer === 'F.Cu' ? '表' : layer === 'B.Cu' ? '裏' : /^In(\d)\.Cu$/.test(layer) ? `内層${layer[2]}` : layer;
+}
+/** 表裏を入れ替えたときの層（内層も上下を反転） */
+export function mirrorLayer(layer, pcb) {
+  const cu = copperLayers(pcb);
+  const i = cu.indexOf(layer);
+  return i < 0 ? layer : cu[cu.length - 1 - i];
+}
 
 /** 既定値で補った PCB データ（旧形式・空データにも対応） */
 export function ensurePcb(project) {
   const p = project.pcb || {};
   if (p.version === 2 && p.settings && p.outline && !Array.isArray(p.outline)) return p; // 既に新形式（同じオブジェクトを返す）
-  const r = project.board?.rules || {};
   const out = {
     version: 2,
     outline: p.outline && !Array.isArray(p.outline) ? p.outline : { type: 'rect', x: 0, y: 0, w: toNm(50), h: toNm(40) },
@@ -24,10 +39,11 @@ export function ensurePcb(project) {
     texts: Array.isArray(p.texts) ? p.texts : [],
     holes: Array.isArray(p.holes) ? p.holes : [],
     settings: {
-      trackWidth: toNm(Math.max(0.25, r.minTrackWidthMm ?? 0.127)),
-      viaDiameter: toNm(Math.max(0.6, r.minViaDiameterMm ?? 0.6)),
-      viaDrill: toNm(Math.max(0.3, r.minViaDrillMm ?? 0.3)),
+      trackWidth: toNm(0.25),
+      viaDiameter: toNm(0.6),
+      viaDrill: toNm(0.3),
       grid: toNm(0.25),
+      layers: 2,
       angleMode: '45',
       ...(p.settings || {}),
     },
@@ -54,8 +70,8 @@ export function boardToFp(inst, bx, by) {
   return { x: inst.side === 'bottom' ? -x : x, y };
 }
 
-export function padLayers(inst, pad) {
-  if (pad.type === 'tht') return COPPER;
+export function padLayers(inst, pad, cu = ['F.Cu', 'B.Cu']) {
+  if (pad.type === 'tht') return cu;
   return [inst.side === 'bottom' ? 'B.Cu' : 'F.Cu'];
 }
 
@@ -76,10 +92,11 @@ export function pointInPad(inst, pad, bx, by, grow = 0) {
 /** 全パッドの一覧（基板座標 mm・層・ネット） */
 export function allPads(pcb) {
   const out = [];
+  const cu = copperLayers(pcb);
   for (const inst of pcb.footprints) {
     inst.fpDef.pads.forEach((pad, k) => {
       const c = fpToBoard(inst, pad.x, pad.y);
-      out.push({ key: `p:${inst.id}:${k}`, inst, pad, k, x: c.x, y: c.y, layers: padLayers(inst, pad), net: inst.padNets?.[pad.num] || null, ref: inst.ref });
+      out.push({ key: `p:${inst.id}:${k}`, inst, pad, k, x: c.x, y: c.y, layers: padLayers(inst, pad, cu), net: inst.padNets?.[pad.num] || null, ref: inst.ref });
     });
   }
   return out;
@@ -213,13 +230,7 @@ export function setOutlineRect(pcb, wMm, hMm) {
 }
 
 // ---------------- 選択・ヒットテスト ----------------
-export function distToSeg(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const l2 = dx * dx + dy * dy;
-  let t = l2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-}
+export { pointSegDist as distToSeg } from '../core/geom2d.js';
 const mmPt = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
 
 /** フットプリントの外接矩形（基板座標 mm） */
@@ -272,14 +283,7 @@ export function hitTest(pcb, p, tol, activeLayer = 'F.Cu') {
   return null;
 }
 
-export function pointInPolygon(p, poly) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i], b = poly[j];
-    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
+export { pointInRing as pointInPolygon } from '../core/geom2d.js';
 
 export function itemsInRect(pcb, a, b) {
   const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
@@ -342,7 +346,7 @@ export function flipSelection(pcb, sel) {
     if (!o || o.locked) continue;
     if (key[0] === 'f') { o.side = o.side === 'bottom' ? 'top' : 'bottom'; changed = true; }
     if (key[0] === 'x') { o.layer = o.layer === 'B.SilkS' ? 'F.SilkS' : 'B.SilkS'; changed = true; }
-    if (key[0] === 't' || key[0] === 'z') { o.layer = o.layer === 'B.Cu' ? 'F.Cu' : 'B.Cu'; changed = true; }
+    if (key[0] === 't' || key[0] === 'z') { o.layer = mirrorLayer(o.layer, pcb); changed = true; }
   }
   return changed;
 }

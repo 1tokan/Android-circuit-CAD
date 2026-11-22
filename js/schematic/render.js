@@ -2,8 +2,8 @@
 import { xform, svgTransform, xformRect } from './geom.js';
 import { getSymbol } from './symbols.js';
 import { labelRect } from './model.js';
+import { esc } from '../core/util.js';
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function prim(g) {
   switch (g.t) {

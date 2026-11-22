@@ -9,18 +9,8 @@
 
 import { xform, onSegment, onSegmentInterior, key } from './geom.js';
 import { getSymbol } from './symbols.js';
+import { DSU } from '../core/util.js';
 
-class DSU {
-  constructor() { this.p = new Map(); }
-  add(a) { if (!this.p.has(a)) this.p.set(a, a); }
-  find(a) {
-    let r = a;
-    while (this.p.get(r) !== r) r = this.p.get(r);
-    while (this.p.get(a) !== r) { const n = this.p.get(a); this.p.set(a, r); a = n; }
-    return r;
-  }
-  union(a, b) { const ra = this.find(a), rb = this.find(b); if (ra !== rb) this.p.set(ra, rb); }
-}
 
 /** 全ピンのシート上の位置 */
 export function pinPositions(sheet) {
