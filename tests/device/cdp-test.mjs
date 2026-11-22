@@ -120,6 +120,7 @@ await step('テストA〜E の通し（WebView 内で実行・各工程の時間
   return out.map((r) => ({ key: r.key, ms: r.ms }));
 });
 
+let testDId = null;
 await step('テストD を開いて PCB を表示（描画時間）', async () => {
   const r = await evaluate(`(async () => {
     const u = URL.createObjectURL(new Blob([${JSON.stringify(scen)}], { type: 'text/javascript' }));
@@ -136,6 +137,7 @@ await step('テストD を開いて PCB を表示（描画時間）', async () =
     await window.pocketEDA.openProject(prj);
     return prj.id;
   })()`);
+  testDId = r;
   await tapSelector('#ws-nav button[data-ws="pcb"]');
   await tapSelector('#btn-zoom-fit');
   await sleep(1500);
@@ -186,8 +188,10 @@ await step('同梱サンプル「USB DAC アンプ」を画面から開き、ERC
   await shot('02c-sample-3d');
   await evaluate('window.pocketEDA.back()');
   await sleep(500);
+  // 以降の操作の試験は、これまでと同じテストD の基板で行う（サンプルはベタの塗り直しが重く、エミュレータでは数秒かかるため）
+  if (testDId) await evaluate(`window.pocketEDA.store.loadProject(${JSON.stringify(testDId)}).then((p) => window.pocketEDA.openProject(p))`);
   await tapSelector('#ws-nav button[data-ws="pcb"]');
-  await sleep(500);
+  await sleep(1500);
   return { ...r, open3dMs, parts3d: gl.parts };
 });
 
