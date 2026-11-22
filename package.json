@@ -1,11 +1,11 @@
 {
   "name": "pocket-eda",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "description": "Android向け電子回路・PCB設計CAD（PWA）",
   "scripts": {
-    "test": "node --test tests/unit.test.mjs tests/schematic.test.mjs tests/library.test.mjs tests/jlcsearch.test.mjs",
+    "test": "node --test tests/unit.test.mjs tests/schematic.test.mjs tests/library.test.mjs tests/jlcsearch.test.mjs tests/pkggen.test.mjs",
     "serve": "python3 -m http.server 8765",
     "e2e": "node tests/e2e.mjs && node tests/e2e-schematic.mjs && node tests/e2e-library.mjs"
   }

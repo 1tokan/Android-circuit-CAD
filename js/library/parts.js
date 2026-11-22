@@ -13,6 +13,7 @@
 
 import { getSymbol, kindInfo } from '../schematic/symbols.js';
 import { getFootprint, padNumbers } from './footprints.js';
+import { generateFootprint } from './pkggen.js';
 
 export const JLC_TYPES = { basic: 'Basic', preferred: 'Preferred', extended: 'Extended', unknown: '不明' };
 
@@ -229,7 +230,8 @@ export function pinCountFromPackage(pkg) {
   const p = String(pkg || '').toUpperCase().replace(/\s/g, '');
   if (/^SOT-?223/.test(p)) return 4;
   if (/^SOT-?89/.test(p)) return 3;
-  if (/^(TO-?252|DPAK|TO-?263|D2PAK)$/.test(p)) return 3;
+  if (/^(TO-?252|DPAK|TO-?263|D2PAK)/.test(p)) return 3;
+  if (/^(SOT-?363|SC-?88|SC-?70-?6)/.test(p)) return 6;
   const m = p.match(/^(?:H?TSSOP|SSOP|MSOP|E?SOP|SOIC|PDIP|DIP|[TVWU]?QFN|[TVWU]?DFN|LQFP|TQFP|QFP|LGA|BGA|SOT-?23|SOT-?363|SC-?70|SC-?88|[VW]?SON|USON)-?(\d{1,3})/);
   if (m) return Number(m[1]) + (/-EP|EP\(|PAD/.test(p) ? 1 : 0);
   if (/^SOT-?23$/.test(p)) return 3;
@@ -251,8 +253,27 @@ export function guessFootprint(kind, pkg) {
     [/^TSSOP-?8$/, 'TSSOP-8'], [/^TSSOP-?14$/, 'TSSOP-14'], [/^TSSOP-?20$/, 'TSSOP-20'],
     [/^DIP-?8$/, 'DIP-8'], [/^DIP-?14$/, 'DIP-14'], [/^DIP-?16$/, 'DIP-16'],
   ];
-  for (const [re, id] of table) if (re.test(p)) return id;
-  return '';
+  // 幅広（300mil 等）は内蔵の細幅 SOIC と寸法が違うので、内蔵には当てはめない
+  const wide = /300MIL|W7\.5|WIDE|-W7/.test(p);
+  if (!wide) for (const [re, id] of table) if (re.test(p)) return id;
+  // 内蔵（照合予定）に無ければ、パッケージ名から標準寸法で自動生成（推定）
+  const gen = generateFootprint(kind, pkg);
+  return gen ? gen.id : '';
+}
+
+/**
+ * ICのピン数: フットプリントが決まればそのパッド番号の数（露出パッド・タブの扱いを一致させる）、
+ * 決まらなければパッケージ名からの推定
+ */
+export function icPinCount(fpId, pkg) {
+  const fp = getFootprint(fpId);
+  return fp ? padNumbers(fp).length : pinCountFromPackage(pkg);
+}
+
+/** 部品の実効フットプリント。未設定ならパッケージ名から推定する */
+export function partFootprint(part) {
+  if (!part) return null;
+  return getFootprint(part.footprint) || getFootprint(guessFootprint(part.kind, part.package));
 }
 
 /** シンボル種別と仕様から、回路図に表示する値 */

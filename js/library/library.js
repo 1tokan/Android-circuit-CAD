@@ -1,7 +1,8 @@
 // 部品ライブラリのサービス層: 内蔵部品＋ユーザー部品（IndexedDB）をまとめて扱う。
 // 同じIDのユーザー部品は内蔵部品より優先（内蔵部品を「コピーして編集」した場合など）。
 
-import { BUILTIN_PARTS, normalizePart, searchParts } from './parts.js';
+import { BUILTIN_PARTS, normalizePart, searchParts, guessFootprint, icPinCount } from './parts.js';
+import { getFootprint } from './footprints.js';
 import * as store from '../core/storage.js';
 
 export function createLibrary() {
@@ -21,6 +22,24 @@ export function createLibrary() {
       const raw = await store.listUserParts();
       user = [];
       for (const r of raw) { try { user.push(normalizePart(r)); } catch { /* 壊れた行は無視 */ } }
+      // フットプリント未設定の部品は、パッケージ名から推定できれば設定して保存し直す
+      const fixed = [];
+      for (const p of user) {
+        let changed = false;
+        if (!getFootprint(p.footprint)) {
+          const id = guessFootprint(p.kind, p.package);
+          if (id) { p.footprint = id; changed = true; }
+        }
+        // IC・コネクタのピン数をフットプリントのパッド番号数にそろえる（ピン対応を手で決めた部品は除く）
+        const fp = getFootprint(p.footprint);
+        if (fp && (p.kind === 'ic' || p.kind === 'connector') && !p.pinMap) {
+          const n = icPinCount(p.footprint, p.package);
+          if (n && p.symbol?.pinCount !== n) { p.symbol = { ...p.symbol, kind: p.kind, pinCount: n }; changed = true; }
+        }
+        if (changed) fixed.push(p);
+      }
+      if (fixed.length) await store.putParts(fixed);
+      this.lastAutoFixed = fixed.length;
       rebuild();
       return merged.length;
     },

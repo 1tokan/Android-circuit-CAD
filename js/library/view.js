@@ -3,6 +3,7 @@ import { KINDS, kindInfo } from '../schematic/symbols.js';
 import { listFootprints, getFootprint, padNumbers } from './footprints.js';
 import {
   JLC_TYPES, normalizePart, partSymbol, effectivePinMap, checkPinMap, lcscUrl, jlcUrl, unitPrice, displayValue,
+  partFootprint, guessFootprint,
 } from './parts.js';
 import { importCSV, importJSON, exportLibraryJSON } from './importer.js';
 import { symbolPreviewSVG } from '../schematic/render.js';
@@ -78,7 +79,9 @@ export function createPartsView(ctx) {
   }
 
   function fpBadge(p) {
-    return getFootprint(p.footprint) ? '' : '<span class="badge planned">フットプリント未設定</span>';
+    const fp = partFootprint(p);
+    if (!fp) return '<span class="badge planned">フットプリント未設定</span>';
+    return fp.generated ? '<span class="badge">FP推定</span>' : '';
   }
 
   function lcscBadge(p) {
@@ -119,7 +122,7 @@ export function createPartsView(ctx) {
 
   function pinTable(p) {
     const sym = partSymbol(p);
-    const fp = getFootprint(p.footprint);
+    const fp = partFootprint(p);
     const pm = effectivePinMap(sym, fp, p.pinMap);
     const chk = checkPinMap(sym, fp, pm);
     const rows = sym.pins.map((pin) => `<tr><td>${esc(pin.num)}</td><td>${esc(pin.name === '~' ? '' : pin.name)}</td><td>${esc(pinTypeLabel(pin.type))}</td><td>${pm.nc.has(pin.num) ? '（未使用）' : esc((pm.map[pin.num] || []).join(', ') || '—')}</td></tr>`).join('');
@@ -136,7 +139,7 @@ export function createPartsView(ctx) {
     const p = typeof idOrPart === 'string' ? ctx.lib.get(idOrPart) : idOrPart;
     if (!p) return;
     const saved = online ? ctx.lib.get(p.id) : p;
-    const fp = getFootprint(p.footprint);
+    const fp = partFootprint(p);
     const builtin = !online && ctx.lib.isBuiltin(p.id);
     const t = ctx.assignTarget();
     const kv = (k, v) => (v === '' || v === null || v === undefined ? '' : `<div class="kv"><span>${esc(k)}</span><b>${v}</b></div>`);
@@ -154,7 +157,8 @@ export function createPartsView(ctx) {
       ${Object.entries(p.specs).map(([k, v]) => kv(k, esc(v))).join('')}
       ${p.description ? `<p class="note">${esc(p.description)}</p>` : ''}
       <div class="pv-links">${links}</div>
-      <h4>シンボルとフットプリント（${esc(fp?.id || p.footprint || '未設定')}${fp && !fp.verified ? ' <span class="badge planned">寸法未照合</span>' : ''}）</h4>
+      <h4>シンボルとフットプリント（${esc(fp?.name || p.footprint || '未設定')}${fp?.generated ? ' <span class="badge planned">パッケージ名から自動生成・要確認</span>' : fp && !fp.verified ? ' <span class="badge planned">寸法未照合</span>' : ''}）</h4>
+      ${fp?.generated ? `<p class="note">${esc(fp.desc)}。標準寸法からの推定なので、発注前にデータシートの推奨ランドパターンと照合してください。</p>` : ''}
       <div class="pv-previews">${symbolPreviewSVG(p.kind, { pinCount: p.symbol.pinCount, pinNames: p.symbol.pinNames })}${footprintSVG(fp)}</div>
       <h4>ピン ↔ パッド対応</h4>${pinTable(p)}
       ${online ? `<p class="note">jlcsearch（非公式のコミュニティAPI）から取得した情報です。価格・在庫は${esc(String(p.updatedAt).slice(0, 16).replace('T', ' '))}時点。${saved && saved.source !== 'jlcsearch' ? '保存済みの部品なので、保存すると価格・在庫・区分だけを更新します（種別・フットプリント・ピン対応は今のまま）。' : 'シンボル種別とフットプリントは推定なので、保存後に「編集」で確認してください。'}</p>` : ''}
@@ -210,7 +214,7 @@ export function createPartsView(ctx) {
       ${f('manufacturer', 'メーカー', v.manufacturer)}${f('mpn', 'メーカー型番', v.mpn)}
       ${f('lcsc', 'LCSC品番', v.lcsc, 'placeholder="例: C1525" autocapitalize="characters"')}
       ${f('package', 'パッケージ', v.package)}
-      <label class="field"><span>フットプリント</span><select name="footprint"><option value="">（未設定）</option>${listFootprints().map((x) => `<option value="${x.id}" ${x.id === fpId ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}<option value="__custom" ${fpId === '__custom' ? 'selected' : ''}>独自定義（JSON）</option></select></label>
+      <label class="field"><span>フットプリント</span><select name="footprint"><option value="">（未設定）</option><option value="__auto">パッケージ名から自動生成</option>${typeof fpId === 'string' && fpId.startsWith('PKG:') ? `<option value="${esc(fpId)}" selected>${esc(getFootprint(fpId)?.name || fpId)}（自動生成）</option>` : ''}${listFootprints().map((x) => `<option value="${x.id}" ${x.id === fpId ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}<option value="__custom" ${fpId === '__custom' ? 'selected' : ''}>独自定義（JSON）</option></select></label>
       <label class="field"><span>独自フットプリント（JSON、上で「独自定義」を選んだとき）</span><textarea name="fpjson" rows="3" placeholder='{"id":"MY_FP","pads":[{"num":"1","x":-1,"y":0,"w":1,"h":1}]}'>${esc(typeof v.footprint === 'object' ? JSON.stringify(v.footprint) : '')}</textarea></label>
       ${f('pinCount', 'ピン数（IC・コネクタ）', v.symbol?.pinCount ?? '', 'inputmode="numeric"')}
       ${f('pinNames', 'ピン名（カンマ区切り、1番から）', v.symbol?.pinNames ?? '')}
@@ -225,6 +229,10 @@ export function createPartsView(ctx) {
     const g = (n) => $(`#dialog-body [name="${n}"]`).value.trim();
     try {
       let footprint = g('footprint');
+      if (footprint === '__auto') {
+        footprint = guessFootprint(g('kind'), g('package'));
+        if (!footprint) throw new Error(`パッケージ名「${g('package')}」からはフットプリントを生成できません。一覧から選ぶか独自定義してください`);
+      }
       if (footprint === '__custom') {
         try { footprint = JSON.parse(g('fpjson')); } catch (e) { throw new Error('独自フットプリントのJSONが読めません: ' + e.message); }
       }
@@ -251,7 +259,7 @@ export function createPartsView(ctx) {
         price: g('price') ? [{ qty: 1, usd: Number(g('price')) }] : [], stock: g('stock') === '' ? null : Number(g('stock')),
         updatedAt: new Date().toISOString(), lcscVerified: p?.lcsc === g('lcsc').toUpperCase() ? !!p?.lcscVerified : false,
       });
-      const fp = getFootprint(part.footprint);
+      const fp = partFootprint(part);
       if (fp) {
         const chk = checkPinMap(partSymbol(part), fp, effectivePinMap(partSymbol(part), fp, part.pinMap));
         if (chk.errors.length) {
@@ -335,7 +343,7 @@ export function createPartsView(ctx) {
     if (!res.parts.length) { ctx.ui.toast(`取り込める部品がありません（スキップ${res.skipped.length}行）`, true); return; }
     const cols = res.columns ? `<p class="note">列の対応: ${Object.entries(res.columns).map(([k, v]) => `${esc(k)}←「${esc(v)}」`).join('、')}</p>` : '';
     const sk = res.skipped.length ? `<p>スキップ ${res.skipped.length}行:</p><ul class="warns">${res.skipped.slice(0, 8).map((s) => `<li>${s.line}行目: ${esc(s.reason)}</li>`).join('')}${res.skipped.length > 8 ? '<li>…</li>' : ''}</ul>` : '';
-    const noFp = res.parts.filter((p) => !getFootprint(p.footprint)).length;
+    const noFp = res.parts.filter((p) => !partFootprint(p)).length;
     const ok = await ctx.ui.ask('部品の取込', `<p><b>${res.parts.length}件</b>を取り込みます（同じLCSC品番は上書き）。</p>${noFp ? `<p class="warn">うち${noFp}件はフットプリントを推定できませんでした。詳細画面の「編集」で設定してください。</p>` : ''}${cols}${sk}`,
       [{ label: 'キャンセル', value: '' }, { label: '取り込む', value: 'ok', cls: 'primary' }]);
     if (ok !== 'ok') return;

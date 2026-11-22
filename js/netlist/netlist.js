@@ -6,7 +6,7 @@
 import { computeConnectivity, cmpRef } from '../schematic/connectivity.js';
 import { getSymbol, kindInfo } from '../schematic/symbols.js';
 import { getFootprint } from '../library/footprints.js';
-import { effectivePinMap, checkPinMap } from '../library/parts.js';
+import { effectivePinMap, checkPinMap, partFootprint } from '../library/parts.js';
 
 export const NETLIST_FORMAT = 'pocket-eda-netlist';
 
@@ -27,7 +27,7 @@ export function sourceHash(project) {
 
 /** 部品の実効フットプリント（部品データ優先 → 回路図の属性） */
 export function componentFootprint(comp, part) {
-  if (part?.footprint) return getFootprint(part.footprint);
+  if (part) return partFootprint(part) || getFootprint(comp.props?.footprint);
   return getFootprint(comp.props?.footprint);
 }
 
@@ -69,7 +69,8 @@ export function generateNetlist(project, { now = new Date().toISOString() } = {}
     else {
       const chk = checkPinMap(sym, fp, pm);
       chk.errors.forEach((m) => err(`${c.ref}: ${m}`, c.ref));
-      if (!fp.verified) warn(`${c.ref}: フットプリント ${fp.id} は寸法が未照合です（第6段階で照合）`, c.ref);
+      if (fp.generated) warn(`${c.ref}: フットプリント「${fp.name}」はパッケージ名から自動生成した推定です。データシートの推奨ランドと照合してください`, c.ref);
+      else if (!fp.verified) warn(`${c.ref}: フットプリント ${fp.id} は寸法が未照合です（第6段階で照合）`, c.ref);
     }
     if (!c.props?.dnp && !(part?.lcsc || c.props?.lcsc)) warn(`${c.ref}: LCSC品番が未設定です（JLCPCBで実装するには必要）`, c.ref);
     if (part && !part.lcscVerified && part.lcsc) warn(`${c.ref}: LCSC品番 ${part.lcsc} は未確認です`, c.ref);
@@ -80,7 +81,7 @@ export function generateNetlist(project, { now = new Date().toISOString() } = {}
     });
     components.push({
       ref: c.ref, kind: c.kind, value: c.props?.value ?? '',
-      footprint: fp?.id || null, footprintVerified: !!fp?.verified,
+      footprint: fp?.id || null, footprintVerified: !!fp?.verified, footprintGenerated: !!fp?.generated,
       lcsc: part?.lcsc || c.props?.lcsc || '', mpn: part?.mpn || c.props?.mpn || '', manufacturer: part?.manufacturer || c.props?.manufacturer || '',
       partId: part?.id || null, dnp: !!c.props?.dnp, pins,
     });

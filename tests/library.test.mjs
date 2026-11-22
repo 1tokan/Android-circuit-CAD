@@ -164,7 +164,8 @@ test('種別・フットプリントの推定', () => {
   assert.equal(guessFootprint('capacitor', 'C0805'), 'C_0805');
   assert.equal(guessFootprint('ic', 'SOT-23-5'), 'SOT-23-5');
   assert.equal(guessFootprint('ic', 'SOIC-8'), 'SOIC-8');
-  assert.equal(guessFootprint('ic', 'QFN-56'), '');
+  assert.equal(guessFootprint('ic', 'QFN-56'), '', '本体寸法の無いQFNは生成しない');
+  assert.equal(guessFootprint('ic', 'QFN-56-EP(7x7)'), 'PKG:ic:QFN-56-EP(7x7)');
 });
 
 // ---------------- CSV / JSON 取込 ----------------

@@ -306,7 +306,7 @@ await step('オンライン検索: 詳細→「保存して回路図に配置」
   assert.equal(saved.datasheet, 'https://example.com/ams1117.pdf');
 });
 
-await step('オンライン検索: ESP32-S3 がICとして呼び出せる（57ピン・フットプリント未設定の表示）', async () => {
+await step('オンライン検索: ESP32-S3 がICとして呼び出せる（57ピン・フットプリントは自動生成）', async () => {
   const ESP = { lcsc: 2913192, mfr: 'ESP32-S3', package: 'QFN-56-EP(7x7)', is_basic: false, is_preferred: false, description: '-40℃~+105℃ 2.4GHz 21dBm 340mA 3V~3.6V 88mA SPI、USB、UART', stock: 525, price: 2.8747 };
   await page.unroute('https://jlcsearch.tscircuit.com/**');
   await page.route('https://jlcsearch.tscircuit.com/**', (route) => route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ components: [ESP] }) }));
@@ -316,18 +316,25 @@ await step('オンライン検索: ESP32-S3 がICとして呼び出せる（57�
   await page.waitForSelector('#pv-online-res .pv-item');
   const t = await page.locator('#pv-online-res').textContent();
   assert.match(t, /57ピン/);
-  assert.match(t, /フットプリント未設定/);
+  assert.match(t, /FP推定/);
+  assert.doesNotMatch(t, /フットプリント未設定/);
   await page.locator('#pv-online-res .pv-item').first().click();
   await page.waitForSelector('#dialog[open]');
-  assert.match(await page.locator('#dialog-body').textContent(), /IC（汎用）/);
+  const body = await page.locator('#dialog-body').textContent();
+  assert.match(body, /IC（汎用）/);
+  assert.match(body, /パッケージ名から自動生成・要確認/);
+  assert.equal(await page.locator('#dialog-body .fp-preview .pad').count(), 57, 'フットプリント図に57パッド');
+  assert.match(body, /ピン↔パッド対応にエラーなし/);
+  await page.locator('#dialog-body .fp-preview').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${OUT}/fp-generated-phone.png` });
   await page.locator('#dialog-actions button[value="place"]').click();
   await page.waitForSelector('#ws-nav button[data-ws="schematic"][aria-current="page"]');
-  assert.match(await page.locator('#toast').textContent(), /フットプリント未設定/);
   await tapWorld(0, 30);
   const c = (await sheet()).components.at(-1);
   assert.equal(c.kind, 'ic');
   assert.equal(c.props.pinCount, 57);
   assert.equal(c.props.lcsc, 'C2913192');
+  assert.equal(c.props.footprint, 'PKG:ic:QFN-56-EP(7x7)');
   assert.equal(await page.locator(`#content [data-key="c:${c.id}"] .pinnum`).count(), 57, '57本のピン番号が描かれる');
   await page.screenshot({ path: `${OUT}/ic-esp32-phone.png` });
 });

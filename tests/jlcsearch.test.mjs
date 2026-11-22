@@ -37,11 +37,11 @@ test('文字列のattributes・価格表・Basic区分・コンデンサの値',
   assert.equal(p.stock, 1000);
 });
 
-test('ESP32-S3（実データの形）: ICとして57ピン、フットプリント未設定', () => {
+test('ESP32-S3（実データの形）: ICとして57ピン、フットプリントは自動生成', () => {
   const p = mapComponent({ lcsc: 2913192, mfr: 'ESP32-S3', package: 'QFN-56-EP(7x7)', is_basic: false, is_preferred: false, description: '-40℃~+105℃ -98.4dBm 150Mbps 2.412GHz~2.484GHz 2.4GHz 21dBm 340mA 3V~3.6V 88mA SPI、USB、UART', stock: 525, price: 2.8747 });
   assert.equal(p.kind, 'ic');
   assert.equal(p.symbol.pinCount, 57);
-  assert.equal(p.footprint, '');
+  assert.equal(p.footprint, 'PKG:ic:QFN-56-EP(7x7)', 'パッケージ名から自動生成');
   assert.equal(p.jlc.type, 'extended');
   const op = mapComponent({ lcsc: 7950, mfr: 'LM358DR2G', package: 'SOIC-8', is_basic: true, description: '-16V~16V 0℃~+70℃ SOIC-8 Operational Amplifier ROHS', stock: 415763, price: 0.0589 });
   assert.equal(op.kind, 'opamp');

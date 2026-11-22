@@ -6,6 +6,8 @@
 // 寸法は IPC-7351 / KiCad 公式フットプリントの公称値に合わせているが、
 // verified:false のものは第6段階（Gerber生成）で KiCad 公式データと照合するまで「未照合」と表示する。
 
+import { generateFootprint } from './pkggen.js';
+
 const smd = (num, x, y, w, h, shape = 'roundrect') => ({ num: String(num), x, y, w, h, shape, type: 'smd' });
 const tht = (num, x, y, size, drill, shape = 'circle') => ({ num: String(num), x, y, w: size, h: size, shape, type: 'tht', drill });
 const r4 = (v) => Math.round(v * 10000) / 10000;
@@ -117,9 +119,18 @@ const ALIASES = {
 export function listFootprints() { return LIST; }
 
 /** ID（または別名）から定義を返す。部品にインライン定義があればそれを優先 */
+const GEN = new Map();
 export function getFootprint(idOrDef) {
   if (!idOrDef) return null;
   if (typeof idOrDef === 'object') return normalizeFootprint(idOrDef);
+  if (idOrDef.startsWith('PKG:')) {
+    // パッケージ名から自動生成したフットプリント（"PKG:<種別>:<パッケージ名>"）
+    if (!GEN.has(idOrDef)) {
+      const m = idOrDef.match(/^PKG:([^:]*):(.+)$/);
+      GEN.set(idOrDef, m ? generateFootprint(m[1], m[2]) : null);
+    }
+    return GEN.get(idOrDef);
+  }
   return MAP.get(idOrDef) || MAP.get(ALIASES[idOrDef]) || null;
 }
 
