@@ -58,6 +58,15 @@ async function tapSelector(sel) {
   await sleep(400);
 }
 const back = async () => { adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); await sleep(800); };
+// エミュレータが重いとキー入力が届くのが遅れる・取りこぼすことがある。
+// 期待した変化を最大4秒待ち、変化が無いときだけもう1回押す（変化した後に重ねて押すことはない）
+const backUntil = async (cond) => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
+    for (let i = 0; i < 20; i++) { await sleep(200); if (await evaluate(cond)) return attempt; }
+  }
+  return -1;
+};
 await send('Runtime.enable');
 await send('Page.enable');
 
@@ -141,12 +150,12 @@ await step('Android の戻るボタン: ドロワーを閉じる → 回路図�
   await tapSelector('#btn-projects');
   if (await evaluate("document.querySelector('#drawer').hidden")) throw new Error('ドロワーが開かない');
   await shot('03-drawer');
-  await back();
-  if (!(await evaluate("document.querySelector('#drawer').hidden"))) throw new Error('戻るでドロワーが閉じない');
+  const r1 = await backUntil("document.querySelector('#drawer').hidden");
+  if (r1 < 0) throw new Error('戻るでドロワーが閉じない');
   if ((await evaluate('window.pocketEDA.state.workspace')) !== 'pcb') throw new Error('ドロワーを閉じただけで画面が変わった');
-  await back();
-  const w = await evaluate('window.pocketEDA.state.workspace');
-  if (w !== 'schematic') throw new Error('戻るで回路図に戻らない: ' + w);
+  const r2 = await backUntil("window.pocketEDA.state.workspace === 'schematic'");
+  if (r2 < 0) throw new Error('戻るで回路図に戻らない: ' + (await evaluate('window.pocketEDA.state.workspace')));
+  return { retried: r1 + r2 };
 });
 
 await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面を開く）', async () => {
