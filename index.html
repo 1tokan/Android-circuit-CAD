@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#14181f">
+  <meta name="description" content="Androidで動く電子回路・PCB設計CAD">
+  <title>Pocket EDA</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- 上部: 主要操作 -->
+    <header class="topbar">
+      <button class="icon-btn" id="btn-projects" aria-label="プロジェクト一覧" title="プロジェクト一覧">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div class="title-block">
+        <button class="project-name" id="project-name" title="名前を変更">—</button>
+        <span class="save-state" id="save-state" data-state="idle" aria-live="polite">—</span>
+      </div>
+      <button class="icon-btn" id="btn-undo" aria-label="元に戻す" title="元に戻す（第2段階）" disabled>
+        <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-redo" aria-label="やり直す" title="やり直す（第2段階）" disabled>
+        <svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-menu" aria-label="メニュー" title="メニュー">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+      </button>
+    </header>
+
+    <!-- 作業領域の切替（スマホ: 上部タブ / タブレット: 左レール） -->
+    <nav class="ws-nav" id="ws-nav" aria-label="作業領域"></nav>
+
+    <!-- 中央: 設計キャンバス -->
+    <main class="stage">
+      <svg id="canvas" class="canvas" role="img" aria-label="設計キャンバス">
+        <defs>
+          <pattern id="grid-minor" patternUnits="userSpaceOnUse" width="1" height="1">
+            <circle cx="0" cy="0" r="0.06" class="grid-dot"/>
+          </pattern>
+          <pattern id="grid-major" patternUnits="userSpaceOnUse" width="10" height="10">
+            <path d="M10 0H0V10" class="grid-line"/>
+          </pattern>
+        </defs>
+        <g id="world">
+          <rect id="grid-minor-rect" fill="url(#grid-minor)"/>
+          <rect id="grid-major-rect" fill="url(#grid-major)"/>
+          <g id="origin"><path d="M-3 0H3M0 -3V3" class="origin"/></g>
+          <g id="content"></g>
+        </g>
+      </svg>
+      <div class="stage-overlay" id="stage-overlay"></div>
+      <div class="zoom-ctl">
+        <button class="icon-btn small" id="btn-zoom-in" aria-label="拡大">＋</button>
+        <button class="icon-btn small" id="btn-zoom-fit" aria-label="全体表示">⤢</button>
+        <button class="icon-btn small" id="btn-zoom-out" aria-label="縮小">－</button>
+      </div>
+      <div class="coords" id="coords"></div>
+    </main>
+
+    <!-- タブレット: 右プロパティパネル -->
+    <aside class="side-panel" id="side-panel">
+      <h2>モジュール状況</h2>
+      <ul id="module-status" class="module-status"></ul>
+    </aside>
+
+    <!-- 下部: 編集ツール -->
+    <footer class="toolbar" id="toolbar" aria-label="編集ツール"></footer>
+  </div>
+
+  <!-- プロジェクト一覧ドロワー -->
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+  <section class="drawer" id="drawer" aria-label="プロジェクト" hidden>
+    <div class="drawer-head">
+      <h2>プロジェクト</h2>
+      <button class="icon-btn" id="btn-drawer-close" aria-label="閉じる">✕</button>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn primary" id="btn-new">＋ 新規</button>
+      <button class="btn" id="btn-import">JSONを読込</button>
+      <input type="file" id="file-import" accept=".json,application/json" hidden>
+    </div>
+    <ul class="project-list" id="project-list"></ul>
+  </section>
+
+  <!-- メニュー -->
+  <div class="menu" id="menu" hidden role="menu">
+    <button role="menuitem" data-act="save" id="btn-save">今すぐ保存</button>
+    <button role="menuitem" data-act="export">JSONで書き出し</button>
+    <button role="menuitem" data-act="duplicate">複製</button>
+    <button role="menuitem" data-act="backups">保存履歴から復元</button>
+    <label class="menu-toggle"><input type="checkbox" id="chk-autosave" checked> 自動保存</label>
+    <button role="menuitem" data-act="about">このアプリについて</button>
+  </div>
+
+  <!-- 汎用ダイアログ -->
+  <dialog id="dialog" class="dialog">
+    <form method="dialog">
+      <h3 id="dialog-title"></h3>
+      <div id="dialog-body"></div>
+      <div class="dialog-actions" id="dialog-actions"></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
