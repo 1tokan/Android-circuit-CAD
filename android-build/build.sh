@@ -29,7 +29,7 @@ p = 'android/app/build.gradle'
 s = open(p).read()
 cfg = f'''
     signingConfigs {{
-        debug {{
+        pocketeda {{
             storeFile file("{ks}")
             storePassword "android"
             keyAlias "androiddebugkey"
@@ -39,6 +39,9 @@ cfg = f'''
 '''
 s, n = re.subn(r'^android \{\n', 'android {\n' + cfg, s, count=1, flags=re.M)
 assert n == 1, 'build.gradle に android { が見つかりません'
+# リリース版（デバッグ機能なし）を同じ鍵で署名する
+s, n = re.subn(r'(buildTypes \{\s*\n\s*release \{\n)', r'\1            signingConfig signingConfigs.pocketeda\n', s, count=1)
+assert n == 1, 'build.gradle に buildTypes { release { が見つかりません'
 open(p, 'w').write(s)
 PY
 
@@ -46,8 +49,9 @@ PY
 grep -q '"@capacitor/filesystem"' android/app/src/main/assets/capacitor.plugins.json
 grep -q '"@capacitor/share"' android/app/src/main/assets/capacitor.plugins.json
 
-(cd android && ./gradlew assembleDebug --no-daemon -q)
-cp android/app/build/outputs/apk/debug/app-debug.apk "dist/pocket-eda-${VERSION}.apk"
+# リリース版（debuggable=false）。デバッグ版は Play プロテクトの確認で警告されやすい
+(cd android && ./gradlew assembleRelease --no-daemon -q)
+cp android/app/build/outputs/apk/release/app-release.apk "dist/pocket-eda-${VERSION}.apk"
 
 # 署名の確認: リポジトリの鍵で署名されていなければ失敗させる（別の鍵だとスマホで上書き更新できない）
 EXPECTED=$(keytool -list -v -keystore "$KS" -storepass android -alias androiddebugkey 2>/dev/null | grep 'SHA256:' | head -1 | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-F' 'a-f')
@@ -56,4 +60,7 @@ ACTUAL=$("$APKSIGNER" verify --print-certs "dist/pocket-eda-${VERSION}.apk" | gr
 echo "expected cert: $EXPECTED"
 echo "actual cert:   $ACTUAL"
 [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo '署名鍵が一致しません'; exit 1; }
+# デバッグ版になっていないことの確認
+AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+if "$AAPT" dump xmltree --file AndroidManifest.xml "dist/pocket-eda-${VERSION}.apk" | grep -q 'debuggable.*=true'; then echo 'debuggable=true になっています'; exit 1; fi
 ls -la dist
