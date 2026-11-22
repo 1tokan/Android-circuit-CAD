@@ -81,13 +81,13 @@ await step('PCB: ベタは塗りつぶし形状で描かれ、ベタでつなが
   await page.screenshot({ path: `${OUT}/pcb-zonefill-phone.png` });
 });
 
-await step('出力タブ: 「未実装」表示なし、Gerber書出は有効・BOM/CPL は無効（第7段階）', async () => {
+await step('出力タブ: 「未実装」表示なし、Gerber・BOM・CPL が有効', async () => {
   await ws('output');
   assert.ok(!(await page.locator('#stage-overlay').isVisible()));
   assert.ok(await page.locator('#output-view').isVisible());
   assert.ok(await page.locator('#toolbar .tool[data-tool="gerber"]').isEnabled());
-  assert.ok(await page.locator('#toolbar .tool[data-tool="bom"]').isDisabled());
-  assert.ok(await page.locator('#toolbar .tool[data-tool="cpl"]').isDisabled());
+  assert.ok(await page.locator('#toolbar .tool[data-tool="bom"]').isEnabled());
+  assert.ok(await page.locator('#toolbar .tool[data-tool="cpl"]').isEnabled());
   assert.match(await page.locator('#output-view').textContent(), /30\.0 × 20\.0 mm/);
   assert.ok(await page.locator('#output-view .plot-preview path').count() >= 1, 'ベタのプレビュー');
   await page.screenshot({ path: `${OUT}/output-phone.png` });
@@ -120,6 +120,47 @@ await step('DRCエラーがあると確認を出し、「やめる」で書き�
   await page.locator('#dialog button[value=""]').click();
   await page.waitForTimeout(300);
   assert.equal(downloaded, false);
+});
+
+await step('部品実装: BOM 3行・CPL 3行を表示し、CSV を書き出す', async () => {
+  await page.evaluate(async () => {
+    const pm = await import('./js/pcb/model.js');
+    // 前の手順で足した細い配線を消す
+    window.pocketEDA.editPcb(() => {
+      const b = window.pocketEDA.state.project.pcb;
+      b.tracks = b.tracks.filter((t) => t.net !== 'X');
+      // 内蔵部品には（未確認の番号を作らないため）LCSC 品番が無いので、試験用に設定
+      const set = { J1: 'C173752', R1: 'C17630', D1: 'C84256' };
+      for (const f of b.footprints) f.lcsc = set[f.ref];
+    }, 'fix');
+  });
+  await page.locator('#output-view [data-tab="asm"]').click();
+  assert.equal(await page.locator('#output-view .tbl').first().locator('tbody tr').count(), 3);
+  assert.equal(await page.locator('#output-view .tbl').nth(1).locator('tbody tr').count(), 3);
+  assert.match(await page.locator('#output-view').textContent(), /C173752/);
+  assert.match(await page.locator('#output-view .check-card').textContent(), /書き出せます/, await page.locator('#output-view .issues').first().textContent());
+  await page.screenshot({ path: `${OUT}/output-asm-phone.png`, fullPage: false });
+  const [b] = await Promise.all([page.waitForEvent('download'), page.locator('#output-view [data-bom]').click()]);
+  if (await page.locator('#dialog[open]').count()) throw new Error('確認ダイアログが出た: ' + await page.locator('#dialog').textContent());
+  assert.equal(b.suggestedFilename(), 'LED_Test-BOM.csv');
+  const bom = fs.readFileSync(await b.path(), 'utf8');
+  assert.ok(bom.startsWith('\uFEFFComment,Designator,Footprint,LCSC Part #'));
+  assert.equal(bom.trim().split('\r\n').length, 4);
+  const [c] = await Promise.all([page.waitForEvent('download'), tool('cpl')]);
+  assert.equal(c.suggestedFilename(), 'LED_Test-CPL.csv');
+  const cpl = fs.readFileSync(await c.path(), 'utf8');
+  assert.match(cpl, /^\uFEFFDesignator,Mid X,Mid Y,Layer,Rotation\r\n/);
+  assert.match(cpl, /R1,15,-6,Top,0\r\n/);
+  fs.writeFileSync(`${OUT}/LED_Test-BOM.csv`, bom); fs.writeFileSync(`${OUT}/LED_Test-CPL.csv`, cpl);
+});
+
+await step('部品実装: +90 で手動補正すると CPL の回転が変わり、元に戻せる', async () => {
+  await page.locator('#output-view [data-rot="R1"][data-d="90"]').click();
+  const f = await page.evaluate(() => window.pocketEDA.state.project.pcb.footprints.find((q) => q.ref === 'R1').cplRotOffset);
+  assert.equal(f, 90);
+  assert.match(await page.locator('#output-view .tbl').nth(1).locator('tbody tr', { hasText: 'R1' }).textContent(), /90°/);
+  await page.evaluate(() => window.pocketEDA.undo());
+  assert.equal(await page.evaluate(() => window.pocketEDA.state.project.pcb.footprints.find((q) => q.ref === 'R1').cplRotOffset), undefined);
 });
 
 await step('コンソールエラーなし', async () => { assert.deepEqual(errors, []); });

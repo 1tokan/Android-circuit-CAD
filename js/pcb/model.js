@@ -119,7 +119,7 @@ export function importNetlist(pcb, nl, resolveFp) {
   for (const c of nl.components) {
     const def = resolveFp(c);
     if (!def) { report.noFootprint.push(c.ref); continue; }
-    const snap = JSON.parse(JSON.stringify({ id: def.id, name: def.name, pads: def.pads, body: def.body, courtyard: def.courtyard, generated: !!def.generated, verified: !!def.verified, jlcRotation: def.jlcRotation || 0 }));
+    const snap = JSON.parse(JSON.stringify({ id: def.id, name: def.name, package: def.package || '', pads: def.pads, body: def.body, courtyard: def.courtyard, generated: !!def.generated, verified: !!def.verified, jlcRotation: def.jlcRotation || 0 }));
     let inst = (c.compId && byComp.get(c.compId)) || byRef.get(c.ref);
     if (inst) {
       if (inst.fpDef.id !== snap.id || JSON.stringify(inst.fpDef.pads) !== JSON.stringify(snap.pads) || JSON.stringify(inst.fpDef.body) !== JSON.stringify(snap.body)) { inst.fpDef = snap; report.fpChanged.push(c.ref); }

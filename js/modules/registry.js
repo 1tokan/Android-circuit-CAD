@@ -12,7 +12,7 @@ export const MODULES = [
   { id: 'erc',       name: 'ERC（電気的ルール）',    stage: 5, status: 'ready', note: '1シートのみ。汎用ICのピン属性は「双方向」扱い（検査結果に未検査項目を表示）' },
   { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'ready', note: 'ベタの細いくびれ・レジストのブリッジ幅は未検査' },
   { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'ready', note: 'RS-274X X2・Excellon・ZIP。ベタの塗りつぶし（クリアランス・サーマル・島除去）を含む' },
-  { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'planned' },
+  { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'ready', note: 'JLCPCB形式。回転はパッケージ補正表＋部品ごとの手動補正（プレビューで要確認）' },
 ];
 
 // 画面上の作業領域（タブ）と、そこで使うモジュール

@@ -77,7 +77,7 @@ index.html ── js/app.js（起動・UIシェル）
 | **4** ✅ | PCBエディタ | 外形、配置、配線（45°）、ビア、GNDポリゴン、ラッツネスト（配線済み除外） |
 | **5** ✅ | ERC・DRC | ERC 14項目・DRC 18項目。結果に検査した項目・未検査の項目を表示。回路A〜の正常系でエラー0、意図的な誤りを検出（単体＋E2E） |
 | **6** ✅ | Gerber・Excellon | RS-274X（X2属性）・Excellon・ZIP、ベタの塗りつぶし。tracespace（pcb-stackup）と pcb-tools（Python）で独立検証（KiCad GerbView は環境に無く未実施） |
-| 7 | BOM・CPL | JLCPCB形式。公式サンプルと列・単位・回転を照合 |
+| **7** ✅ | BOM・CPL | JLCPCB形式（列は JLCPCB ヘルプの指定どおり）。座標を Gerber と照合、回転は Fabrication Toolkit の補正表と規則に合わせ、部品ごとに手動補正可 |
 | 8 | Android実機テスト | Pixel等で操作性改善、テストプロジェクトA〜Eを通しで実施 |
 
 ## 5. 既知のリスク

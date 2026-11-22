@@ -24,7 +24,7 @@ import { createOutputView } from './output/view.js';
 import { moduleById } from './modules/registry.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 
 const state = {
   project: null,
@@ -119,7 +119,8 @@ function editSchematic(fn, label) {
 
 /** 作業中の画面のエディタと履歴 */
 function activeEditor() { return state.workspace === 'pcb' ? state.pcbEditor : state.workspace === 'schematic' ? state.editor : null; }
-function activeHistory() { return state.workspace === 'pcb' ? state.pcbHistory : state.workspace === 'schematic' ? state.history : null; }
+// 出力タブでの変更（部品の実装向きの補正）は PCB の履歴に積む
+function activeHistory() { return ['pcb', 'output'].includes(state.workspace) ? state.pcbHistory : state.workspace === 'schematic' ? state.history : null; }
 function activeVp() { return state.workspace === 'pcb' ? state.pcbVp : state.vp; }
 
 /** PCB の編集（PCB用の元に戻す履歴に積む） */
@@ -136,8 +137,7 @@ function undoRedo(kind) {
   const l = kind === 'undo' ? h.undo() : h.redo();
   if (l === null) return;
   mutateProject(() => {}, kind);
-  ed.state.sel = new Set();
-  ed.render();
+  if (ed) { ed.state.sel = new Set(); ed.render(); }
   renderSidePanel();
   toast(`${kind === 'undo' ? '元に戻す' : 'やり直す'}: ${l}`);
 }
@@ -219,7 +219,11 @@ function renderToolbar() {
 
 function onTool(id) {
   if (state.workspace === 'parts') { state.partsView.action(id); return; }
-  if (state.workspace === 'output') { if (id === 'gerber') state.outputView.exportZip(); return; }
+  if (state.workspace === 'output') {
+    if (id === 'gerber') state.outputView.exportZip();
+    else { state.outputView.setTab('asm'); state.outputView.exportAssembly(id); }
+    return;
+  }
   if (state.workspace === 'check') {
     if (id === 'rules') state.checkView.editRules();
     else state.checkView.run(id);
@@ -754,6 +758,7 @@ async function boot() {
     version: APP_VERSION,
     toast, ask, download, fmtTime,
     runDrc: () => state.checkView.run('drc', { quiet: true }),
+    editPcb: (fn, label) => editPcb(fn, label),
   });
   state.partsView = createPartsView({
     root: $('#parts-view'),
