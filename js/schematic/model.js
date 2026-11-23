@@ -195,13 +195,14 @@ const ids = (sel, t) => new Set([...sel].filter((k) => k.startsWith(t + ':')).ma
 function transformSelection(sheet, sel, fn, compFn) {
   const cs = ids(sel, 'c'), ws = ids(sel, 'w'), ls = ids(sel, 'l');
   const moved = new Map(); // 旧座標キー → 新座標
+  const pinMoved = new Map(); // 動いた部品のピンだけ（旧座標キー → 新座標）
 
   for (const c of sheet.components) {
     if (!cs.has(c.id)) continue;
     const sym = getSymbol(c);
     const before = sym.pins.map((p) => xform(p, c));
     compFn(c);
-    sym.pins.forEach((p, i) => moved.set(key(before[i].x, before[i].y), xform(p, c)));
+    sym.pins.forEach((p, i) => { const n = xform(p, c), k = key(before[i].x, before[i].y); moved.set(k, n); pinMoved.set(k, n); });
   }
   for (const w of sheet.wires) {
     if (!ws.has(w.id)) continue;
@@ -216,6 +217,26 @@ function transformSelection(sheet, sel, fn, compFn) {
     const n = fn(l);
     moved.set(key(l.x, l.y), n);
     l.x = n.x; l.y = n.y;
+  }
+  // 選択外のネットラベル・電源記号（GND など）が、動いた部品のピンにじかに付いていれば一緒に動かす。
+  // ラベルや電源記号だけで結線した回路図（AI の作図など）で、部品を動かすと接続が外れてしまうのを防ぐ。
+  // ただし同じ点に選択外の部品のピンもあるとき（そちらにも付いている）は動かさない。
+  const pinKeys = new Map(); // 選択外の部品のピン位置 → 本数（電源記号自身は除く）
+  for (const c of sheet.components) {
+    if (cs.has(c.id) || kindInfo(c.kind)?.power) continue;
+    for (const p of getSymbol(c).pins) { const q = xform(p, c); const k = key(q.x, q.y); pinKeys.set(k, (pinKeys.get(k) || 0) + 1); }
+  }
+  for (const l of sheet.labels) {
+    if (ls.has(l.id)) continue;
+    const k = key(l.x, l.y), n = pinMoved.get(k);
+    if (n && !pinKeys.has(k)) { l.x = n.x; l.y = n.y; }
+  }
+  for (const c of sheet.components) {
+    if (cs.has(c.id) || !kindInfo(c.kind)?.power) continue;
+    const pin = getSymbol(c).pins[0];
+    if (!pin) continue;
+    const q = xform(pin, c), k = key(q.x, q.y), n = pinMoved.get(k);
+    if (n && !pinKeys.has(k)) { c.x += n.x - q.x; c.y += n.y - q.y; }
   }
   // 選択外の配線端点を追従。片側だけ動いて斜めになる配線は、元の向きを保った直角の折れ線にする
   const extra = [];

@@ -235,3 +235,23 @@ test('History: 元に戻す・やり直す、変化なしは積まない', () =>
   h.record(() => addComponent(doc.sheet, 'capacitor', 0, 10), '配置');
   assert.equal(h.canRedo(), false, '新しい編集でやり直し履歴は消える');
 });
+
+test('部品を動かす・回すと、ピンにじかに付いたネットラベルと電源記号も一緒に動く（接続が外れない）', () => {
+  const sh = emptySheet();
+  const r = addComponent(sh, 'resistor', 100, 100);
+  const pins = pinPositions(sh).filter((p) => p.compId === r.id);
+  const p1 = pins.find((p) => p.pin === '1'), p2 = pins.find((p) => p.pin === '2');
+  addLabel(sh, p1.x, p1.y, 'SIG');
+  const g = addComponent(sh, 'gnd', p2.x, p2.y);
+  // 別の部品のピンと共有しているラベルは動かさない
+  const c = addComponent(sh, 'capacitor', 300, 100);
+  const cp = pinPositions(sh).find((p) => p.compId === c.id && p.pin === '1');
+  addLabel(sh, cp.x, cp.y, 'SIG');
+  const before = computeConnectivity(sh).nets.map((n) => n.pins.map((p) => `${p.ref}.${p.pin}`).sort().join(',')).sort();
+  moveSelection(sh, new Set([`c:${r.id}`]), 40, 60);
+  rotateSelection(sh, new Set([`c:${r.id}`]));
+  const after = computeConnectivity(sh).nets.map((n) => n.pins.map((p) => `${p.ref}.${p.pin}`).sort().join(',')).sort();
+  assert.deepEqual(after, before);
+  assert.notDeepEqual([g.x, g.y], [p2.x, p2.y], 'GND 記号も動いた');
+  assert.equal(sh.labels.filter((l) => l.x === cp.x && l.y === cp.y).length, 1, 'C の SIG ラベルは元の位置のまま');
+});

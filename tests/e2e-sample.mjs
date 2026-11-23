@@ -55,6 +55,34 @@ await step('回路図と PCB が表示される', async () => {
   await page.screenshot({ path: `${OUT}/sample-pcb.png` });
 });
 
+await step('回路図で部品（Y1）を指で動かしても、付いているラベル・GND 記号が追従して接続が外れない', async () => {
+  await ws('schematic');
+  const info = await page.evaluate(() => {
+    const sh = window.pocketEDA.state.project.schematic.sheets[0];
+    const c = sh.components.find((x) => x.ref === 'Y1');
+    window.pocketEDA.jumpTo('schematic', { x: c.x, y: c.y });
+    return { id: c.id, x: c.x, y: c.y };
+  });
+  await page.waitForTimeout(400);
+  const box = await page.locator(`[data-key="c:${info.id}"]`).boundingBox();
+  const sx = box.x + box.width / 2, sy = box.y + box.height / 2;
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) await page.mouse.move(sx + i * 12, sy - i * 15);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  const r = await page.evaluate(async (id) => {
+    const { runErc } = await import('./js/check/erc.js');
+    const p = window.pocketEDA.state.project;
+    const c = p.schematic.sheets[0].components.find((x) => x.id === id);
+    const e = runErc(p);
+    return { x: c.x, y: c.y, errors: e.summary.errors, warnings: e.summary.warnings, msgs: e.issues.map((i) => i.message).slice(0, 5) };
+  }, info.id);
+  assert.ok(r.x !== info.x || r.y !== info.y, 'Y1 が動いていない');
+  assert.deepEqual([r.errors, r.warnings], [0, 0], r.msgs.join('\n'));
+  await page.screenshot({ path: `${OUT}/sample-move.png` });
+});
+
 await step('検査タブ: ERC・DRC のエラー 0、未配線 0', async () => {
   await ws('check');
   await page.waitForTimeout(500);
