@@ -65,23 +65,29 @@ test('サンプル: 電流の設定どおりの配線幅（track_current／via_c
   assert.equal(bad.length, 0, bad.map((i) => i.message).join('\n'));
 });
 
-test('サンプル: USB の規格（VBUS 直結の容量 1〜10µF）と突入電流の制限（ロードスイッチの後ろに全部）', () => {
+test('サンプル: USB の規格（VBUS 直結の容量 1〜10µF）・電源の入口は耐圧 30V の P-ch MOSFET でゆっくり入れる', () => {
   const onNet = (net) => pcb.footprints.filter((f) => Object.values(f.padNets || {}).includes(net));
   const capsOn = (net) => onNet(net).filter((f) => /^C/.test(f.ref));
-  const vbusC = capsOn('VBUS').reduce((s, f) => s + capUf(f.value), 0);
+  // VBUS に直接つながる容量（ゲート–ソースの C40 は 100kΩ を通して充電されるので除く）
+  const vbusC = capsOn('VBUS').filter((f) => !Object.values(f.padNets).includes('SYS_G')).reduce((s, f) => s + capUf(f.value), 0);
   assert.ok(vbusC >= 1 && vbusC <= 10, `VBUS 直結の容量 ${vbusC}µF`);
-  // VBUS に直接つながる IC はロードスイッチ U10 と USB の ESD（U1）だけ
-  assert.deepEqual(onNet('VBUS').filter((f) => /^U/.test(f.ref)).map((f) => f.ref).sort(), ['U1', 'U10']);
-  const u10 = fp('U10');
-  assert.equal(u10.padNets['1'], 'VBUS'); assert.equal(u10.padNets['6'], '+5V_SYS'); assert.equal(u10.padNets['3'], 'SYS_ON');
-  // ON は VBUS から RC で遅らせる（VIN より先に ON が上がると立ち上がりが制御されない）
-  assert.ok(capsOn('SYS_ON').length === 1 && onNet('SYS_ON').some((f) => /^R/.test(f.ref)));
-  // 立ち上がりの速さ（TPS22918: SR = 0.55×CT[pF] + 30 µs/V）と、後ろの容量に流れる電流
-  const ct = capsOn('SYS_CT').reduce((s, f) => s + capUf(f.value), 0) * 1e6; // pF
-  const srUsPerV = 0.55 * ct + 30;
+  // VBUS に直接つながる半導体は USB の ESD（U1）と Q1 だけ（耐圧 6V の IC を VBUS に直結しない）
+  assert.deepEqual(onNet('VBUS').filter((f) => /^[UQD]\d/.test(f.ref)).map((f) => f.ref).sort(), ['Q1', 'U1']);
+  const q = fp('Q1');
+  assert.equal(q.value, 'AO3401A'); assert.equal(q.lcsc, 'C15127');
+  assert.equal(q.padNets['2'], 'VBUS'); assert.equal(q.padNets['3'], '+5V_SYS'); assert.equal(q.padNets['1'], 'SYS_G');
+  // ゲートの部品: ソースへ Cg（挿した瞬間に切れたまま）、ドレインへ Cgd（上がる速さ）、GND へ Rg
+  const at = (net, other) => onNet('SYS_G').find((f) => f.ref !== 'Q1' && Object.values(f.padNets).includes(other));
+  const cg = at('SYS_G', 'VBUS'), cgd = at('SYS_G', '+5V_SYS'), rg = at('SYS_G', 'GND');
+  assert.ok(cg && cgd && rg, 'Cg・Cgd・Rg');
+  const Cg = capUf(cg.value), Cgd = capUf(cgd.value), Rg = parseFloat(rg.value) * (/k/.test(rg.value) ? 1e3 : 1);
+  // 挿した瞬間の Vgs = −5V × Cgd/(Cg+Cgd) が閾値（最小 −0.5V）より浅い
+  assert.ok(5 * Cgd / (Cg + Cgd) < 0.3, `挿した瞬間の |Vgs| ${(5 * Cgd / (Cg + Cgd)).toFixed(2)}V`);
+  // 立ち上がりの速さ ≈ (5V − 1.8V)/Rg/Cgd と、後ろの容量に流れる電流
+  const slew = (5 - 1.8) / Rg / (Cgd * 1e-6); // V/s
   const down = ['+5V_SYS', '+3V3', '+3V3A', 'VDD_SPI', 'CHIP_PU', 'DAC_LDOO'].flatMap(capsOn).reduce((s, f) => s + capUf(f.value), 0);
-  const inrushMa = down / srUsPerV * 1000; // µF × V/µs → A
-  assert.ok(inrushMa < 100, `突入電流 約 ${inrushMa.toFixed(0)}mA（後ろの容量 ${down.toFixed(1)}µF、${srUsPerV}µs/V）`);
+  const inrushMa = down * 1e-6 * slew * 1000;
+  assert.ok(inrushMa < 100, `突入電流 約 ${inrushMa.toFixed(0)}mA（後ろの容量 ${down.toFixed(1)}µF）`);
   // スピーカーは 2 段目のスイッチ（ESP32 が入れる）
   const u9 = fp('U9');
   assert.equal(u9.padNets['1'], '+5V_SYS'); assert.equal(u9.padNets['6'], '+5V_SPK'); assert.equal(u9.padNets['3'], 'SPK_PWR');
