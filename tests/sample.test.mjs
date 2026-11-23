@@ -50,7 +50,7 @@ test('サンプル: Gerber（内層 .g1/.g2・長穴 G85）と BOM/CPL が出せ
   const pth = files.find((f) => f.name.endsWith('-PTH.drl')).content;
   assert.match(pth, /G85/, 'USB-C の固定足は長穴');
   const asm = M.asm.buildAssembly(prj, pcb, { boards: 5 });
-  assert.equal(asm.cpl.length, pcb.footprints.length);
+  assert.equal(asm.cpl.length, pcb.footprints.filter((f) => !f.dnp).length); // テストパッド（DNP）は載せない
   for (const ref of ['U4', 'U5', 'U6', 'U7', 'U8', 'J1', 'J2', 'J3', 'J4']) assert.ok(asm.bom.some((b) => b.designators.includes(ref) && b.lcsc), `${ref} の LCSC 品番`);
 });
 
@@ -65,15 +65,40 @@ test('サンプル: 電流の設定どおりの配線幅（track_current／via_c
   assert.equal(bad.length, 0, bad.map((i) => i.message).join('\n'));
 });
 
-test('サンプル: USB の規格（VBUS 直結の容量 10µF 以下・スピーカー電源はロードスイッチの後ろ・CC を検出）', () => {
+test('サンプル: USB の規格（VBUS 直結の容量 1〜10µF）と突入電流の制限（ロードスイッチの後ろに全部）', () => {
   const onNet = (net) => pcb.footprints.filter((f) => Object.values(f.padNets || {}).includes(net));
-  const vbusC = onNet('VBUS').filter((f) => /^C/.test(f.ref)).reduce((s, f) => s + capUf(f.value), 0);
-  assert.ok(vbusC > 0 && vbusC <= 10, `VBUS 直結の容量 ${vbusC}µF`);
+  const capsOn = (net) => onNet(net).filter((f) => /^C/.test(f.ref));
+  const vbusC = capsOn('VBUS').reduce((s, f) => s + capUf(f.value), 0);
+  assert.ok(vbusC >= 1 && vbusC <= 10, `VBUS 直結の容量 ${vbusC}µF`);
+  // VBUS に直接つながる IC はロードスイッチ U10 と USB の ESD（U1）だけ
+  assert.deepEqual(onNet('VBUS').filter((f) => /^U/.test(f.ref)).map((f) => f.ref).sort(), ['U1', 'U10']);
+  const u10 = fp('U10');
+  assert.equal(u10.padNets['1'], 'VBUS'); assert.equal(u10.padNets['6'], '+5V_SYS'); assert.equal(u10.padNets['3'], 'SYS_ON');
+  // ON は VBUS から RC で遅らせる（VIN より先に ON が上がると立ち上がりが制御されない）
+  assert.ok(capsOn('SYS_ON').length === 1 && onNet('SYS_ON').some((f) => /^R/.test(f.ref)));
+  // 立ち上がりの速さ（TPS22918: SR = 0.55×CT[pF] + 30 µs/V）と、後ろの容量に流れる電流
+  const ct = capsOn('SYS_CT').reduce((s, f) => s + capUf(f.value), 0) * 1e6; // pF
+  const srUsPerV = 0.55 * ct + 30;
+  const down = ['+5V_SYS', '+3V3', '+3V3A', 'VDD_SPI', 'CHIP_PU', 'DAC_LDOO'].flatMap(capsOn).reduce((s, f) => s + capUf(f.value), 0);
+  const inrushMa = down / srUsPerV * 1000; // µF × V/µs → A
+  assert.ok(inrushMa < 100, `突入電流 約 ${inrushMa.toFixed(0)}mA（後ろの容量 ${down.toFixed(1)}µF、${srUsPerV}µs/V）`);
+  // スピーカーは 2 段目のスイッチ（ESP32 が入れる）
   const u9 = fp('U9');
-  assert.equal(u9.padNets['1'], 'VBUS'); assert.equal(u9.padNets['6'], '+5V_SPK'); assert.equal(u9.padNets['3'], 'SPK_PWR');
+  assert.equal(u9.padNets['1'], '+5V_SYS'); assert.equal(u9.padNets['6'], '+5V_SPK'); assert.equal(u9.padNets['3'], 'SPK_PWR');
   for (const ref of ['U7', 'U8']) assert.ok(Object.values(fp(ref).padNets).includes('+5V_SPK'), `${ref} は +5V_SPK から`);
+  for (const ref of ['U2', 'U3']) assert.equal(fp(ref).padNets['1'], '+5V_SYS', `${ref}（LDO）の入力`);
   const u4 = Object.values(fp('U4').padNets);
   assert.ok(u4.includes('CC1') && u4.includes('CC2'), 'CC1/CC2 を ESP32 で読む');
+});
+
+test('サンプル: 実装する部品はすべて LCSC 品番つき・フットプリントはすべて KiCad 公式と照合済み', () => {
+  const missing = pcb.footprints.filter((f) => !f.dnp && !f.lcsc).map((f) => f.ref);
+  assert.deepEqual(missing, []);
+  assert.ok(fp('TP1').dnp && fp('TP2').dnp, 'テストパッドは実装しない');
+  M.zonefill.fillAllZones(pcb, M.drc.drcRules(prj));
+  const unv = M.drc.runDrc(prj, pcb).issues.filter((i) => i.rule === 'footprint_unverified');
+  assert.equal(unv.length, 0, unv.map((i) => i.message).join('\n'));
+  assert.equal(fp('R11').value, '390k');
 });
 
 test('サンプル: ゲイン 3dB 設定・ジャックの ESD 保護', () => {
