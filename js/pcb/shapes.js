@@ -137,6 +137,8 @@ export function placeRefdes(pcb, { gap = 0.15, dryRun = false, refs = null } = {
         cands.push([fb.x1 + d + w / 2, cy + 0.5 + sy * 0.5]); // 右
       }
     }
+    // 周りに空きが無いときは、部品の本体の上（パッドの無い所。TSSOP・SOT などの中央）
+    for (const sy of [0, -0.5, 0.5]) cands.push([cx, cy + 0.5 + sy]);
     let done = false;
     for (const [x, y] of cands) {
       const b = refBox(f, x, y);

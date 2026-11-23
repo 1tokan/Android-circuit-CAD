@@ -107,3 +107,13 @@ test('PCBA の種類: 片面ならエコノミー、両面なら標準（70×70m
   assert.ok(b.summary.service.rails, '50×40mm は 70×70mm より小さい');
   assert.equal(b.summary.service.setupUsd, 51.12);
 });
+
+test('PCBA の種類: エコノミーで選べないレジスト色・表面処理なら標準', () => {
+  const one = board([['R1', 'R_0805', 10, 5]]);
+  one.prj.board.fab = { ...one.prj.board.fab, thicknessMm: 1.6, maskColor: 'black', finish: 'ENIG' };
+  const a = buildAssembly(one.prj, one.pcb);
+  assert.equal(a.summary.service.type, 'standard');
+  assert.ok(a.summary.service.why.some((w) => /レジスト black/.test(w)));
+  one.prj.board.fab.maskColor = 'green';
+  assert.equal(buildAssembly(one.prj, one.pcb).summary.service.type, 'economic');
+});

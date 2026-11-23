@@ -43,7 +43,16 @@ export function bomPackageName(fpDef) {
 // JLCPCB の PCBA の種類（2026年10月時点の JLCPCB の案内。料金は目安）
 // エコノミー: 片面実装だけ・2/4/6 層・板厚 0.8〜1.6mm・1枚 10×10mm 以上。標準: 両面も可、1枚 70×70mm 未満は JLCPCB が捨て基板（エッジレール）を付ける
 export const JLC_PCBA = {
-  economic: { label: 'エコノミー PCBA', setupUsd: 8.18, stencilUsd: 1.53, layers: [2, 4, 6], thicknessMm: [0.8, 1.6], minMm: 10 },
+  economic: {
+    label: 'エコノミー PCBA', setupUsd: 8.18, stencilUsd: 1.53, layers: [2, 4, 6], thicknessMm: [0.8, 1.6], minMm: 10,
+    // 選べる組み合わせ（JLCPCB の「PCB Specs for Economic PCB Assembly」の表。表の並びから 2・4・6 層の順に読んだもの）
+    specs: {
+      2: [[0.8, ['green'], ['HASL', 'LeadFreeHASL']], [1.0, ['green', 'black'], ['HASL', 'LeadFreeHASL']], [1.2, ['green', 'black'], ['HASL', 'LeadFreeHASL']],
+        [1.6, ['green'], ['HASL', 'LeadFreeHASL', 'ENIG']], [1.6, ['black', 'blue', 'purple'], ['HASL', 'LeadFreeHASL']], [1.6, ['red', 'white'], ['HASL']]],
+      4: [[1.0, ['green'], ['HASL', 'LeadFreeHASL']], [1.2, ['green'], ['HASL', 'LeadFreeHASL']], [1.6, ['green'], ['HASL', 'LeadFreeHASL', 'ENIG']]],
+      6: [[1.6, ['green'], ['ENIG']]],
+    },
+  },
   standard: { label: '標準 PCBA', setupUsd: { single: 25.56, double: 51.12 }, stencilUsd: { single: 8.21, double: 16.42 }, minMm: 70, railMm: 5 },
 };
 
@@ -59,6 +68,12 @@ export function pcbaService(project, pcb, cpl) {
   if (!E.layers.includes(nL)) why.push(`${nL} 層（エコノミーは ${E.layers.join('/')} 層）`);
   if (t < E.thicknessMm[0] || t > E.thicknessMm[1]) why.push(`板厚 ${t}mm（エコノミーは ${E.thicknessMm[0]}〜${E.thicknessMm[1]}mm）`);
   if (w < E.minMm || h < E.minMm) why.push(`基板が ${E.minMm}×${E.minMm}mm より小さい（面付けが必要）`);
+  const fab = project.board?.fab || {};
+  const rows = E.specs[nL];
+  if (rows && fab.maskColor && fab.finish && !rows.some(([th, colors, fins]) => Math.abs(th - t) < 1e-6 && colors.includes(fab.maskColor) && fins.includes(fab.finish))) {
+    const ok = rows.filter(([th]) => Math.abs(th - t) < 1e-6).map(([, c, f]) => `${c.join('/')}・${f.join('/')}`).join('、');
+    why.push(`${nL} 層 ${t}mm でレジスト ${fab.maskColor}・表面処理 ${fab.finish}（エコノミーで選べるのは ${ok || 'なし'}）`);
+  }
   const type = why.length ? 'standard' : 'economic';
   const sides = both ? 'double' : 'single';
   const rails = type === 'standard' && (w < S.minMm || h < S.minMm);
