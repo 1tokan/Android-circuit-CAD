@@ -97,6 +97,21 @@ await step('検査タブ: ERC・DRC のエラー 0、未配線 0', async () => {
   await page.screenshot({ path: `${OUT}/sample-check.png` });
 });
 
+await step('検査タブの「信号経路」: USB・I2S・アナログの経路が出て、エラーなし', async () => {
+  await ws('check');
+  await page.click('[data-run="sig"]');
+  await page.waitForSelector('.chains .chain');
+  const r = await page.evaluate(() => ({
+    chains: [...document.querySelectorAll('.chains .chain b')].map((b) => b.textContent),
+    sum: window.pocketEDA.state.project.checks.sig.summary,
+  }));
+  assert.equal(r.sum.errors, 0);
+  assert.ok(r.chains.some((t) => /^USB: J1 → U4/.test(t)), r.chains.join('\n'));
+  assert.ok(r.chains.some((t) => /スピーカー（右）: U8 → J4/.test(t)));
+  assert.ok(r.chains.some((t) => /アナログ（左）: U5 → J2/.test(t)));
+  await page.screenshot({ path: `${OUT}/sample-signal.png`, fullPage: true });
+});
+
 await step('検査タブの「電流」: 必要な幅が表示され、電流を上げると DRC が配線幅の不足を警告する', async () => {
   await ws('check');
   await page.click('[data-current]');

@@ -8,9 +8,10 @@ export const MODULES = [
   { id: 'library',   name: '電子部品ライブラリ',     stage: 3, status: 'ready' },
   { id: 'lcsc',      name: 'LCSC部品検索・管理',     stage: 3, status: 'ready', note: '公式APIは非使用（CSV/JSON取込・手動登録・LCSCリンク）' },
   { id: 'netlist',   name: 'ネットリスト生成',       stage: 3, status: 'ready' },
-  { id: 'pcb',       name: 'PCBレイアウトエディタ',  stage: 4, status: 'ready', note: '自動配線・3D表示は将来' },
+  { id: 'pcb',       name: 'PCBレイアウトエディタ',  stage: 4, status: 'ready', note: '自動配線（グリッド A*・引き直し）・3D 表示（簡易形状）あり' },
   { id: 'erc',       name: 'ERC（電気的ルール）',    stage: 5, status: 'ready', note: '1シートのみ。汎用ICのピン属性は「双方向」扱い（検査結果に未検査項目を表示）' },
-  { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'ready', note: 'ベタの細いくびれ・レジストのブリッジ幅は未検査' },
+  { id: 'drc',       name: 'DRC（基板設計ルール）',  stage: 5, status: 'ready', note: '配線幅と電流（IPC-2221 の近似）を含む。ベタの細いくびれは未検査' },
+  { id: 'signal',    name: '信号経路（USB・I2S・アナログ音声）', stage: 5, status: 'ready', note: 'つながり・左右・極性・役割は汎用。設定ピン・レベル・入力インピーダンスは登録した部品（PCM5102A・TPA6132A2・MAX98357A・USBLC6）のみ。ファームウェアは対象外' },
   { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'ready', note: 'RS-274X X2・Excellon・ZIP。ベタの塗りつぶし（クリアランス・サーマル・島除去）を含む' },
   { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'ready', note: 'JLCPCB形式。回転はパッケージ補正表＋部品ごとの手動補正（プレビューで要確認）' },
 ];
@@ -20,7 +21,7 @@ export const WORKSPACES = [
   { id: 'schematic', label: '回路図', icon: 'sch', modules: ['schematic', 'netlist'] },
   { id: 'pcb',       label: 'PCB',   icon: 'pcb', modules: ['pcb'] },
   { id: 'parts',     label: '部品',  icon: 'parts', modules: ['library', 'lcsc'] },
-  { id: 'check',     label: '検査',  icon: 'check', modules: ['erc', 'drc'] },
+  { id: 'check',     label: '検査',  icon: 'check', modules: ['erc', 'drc', 'signal'] },
   { id: 'output',    label: '出力',  icon: 'out', modules: ['gerber', 'bomcpl'] },
 ];
 
@@ -55,6 +56,7 @@ export const TOOLS = {
   check: [
     { id: 'erc', label: 'ERC実行', icon: 'M4 12h4l2-5 4 10 2-5h4' },
     { id: 'drc', label: 'DRC実行', icon: 'M4 4h16v16H4zM8 8h3v3H8zM13 13h3v3h-3zM11 9.5h4v3.5' },
+    { id: 'sig', label: '信号経路', icon: 'M3 12h4l3-6 4 12 3-6h4M19 9l3 3-3 3' },
     { id: 'rules', label: 'ルール', icon: 'M5 6h14M5 12h14M5 18h14M9 4v4M15 10v4M8 16v4' },
   ],
   output: [

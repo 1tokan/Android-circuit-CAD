@@ -484,3 +484,6 @@ button { font: inherit; color: inherit; }
 .v3d-tools { padding: 8px 12px 0; }
 .v3d-note { margin: 6px 12px; padding-bottom: env(safe-area-inset-bottom); font-size: 12px; }
 .dialog ul.plain, ul.plain { padding-left: 1.2em; max-height: 40vh; overflow: auto; font-size: 13px; }
+.chains { list-style: none; padding: 0; margin: 4px 0 12px; }
+.chain { padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.chain small { display: block; margin-top: 2px; opacity: .8; overflow-wrap: anywhere; line-height: 1.5; }

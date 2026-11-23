@@ -3,6 +3,7 @@
 
 import { runErc, ercStatus } from './erc.js';
 import { runDrc, drcStatus } from './drc.js';
+import { runSignals, signalStatus } from './signal.js';
 import { drcRules, baseRules, layerCount } from './rules.js';
 import { esc } from '../core/util.js';
 import { currentSettings, requiredWidthMm, viaCapacityA, layerOz, DEFAULT_TEMP_RISE } from './current.js';
@@ -27,16 +28,16 @@ export function createCheckView(ctx) {
 
   function status(kind) {
     const p = ctx.getProject();
-    return kind === 'erc' ? ercStatus(p) : drcStatus(p, ctx.getPcb());
+    return kind === 'erc' ? ercStatus(p) : kind === 'sig' ? signalStatus(p) : drcStatus(p, ctx.getPcb());
   }
 
   function run(kind, { quiet = false } = {}) {
     const p = ctx.getProject();
-    const r = kind === 'erc' ? runErc(p) : runDrc(p, ctx.getPcb());
+    const r = kind === 'erc' ? runErc(p) : kind === 'sig' ? runSignals(p, ctx.getPcb()) : runDrc(p, ctx.getPcb());
     ctx.mutate((q) => { q.checks = { ...(q.checks || {}), [kind]: r }; }, `check:${kind}`);
     st.tab = kind;
     render();
-    if (!quiet) ctx.toast(`${kind.toUpperCase()}: エラー ${r.summary.errors}・警告 ${r.summary.warnings}`);
+    if (!quiet) ctx.toast(`${kind === 'sig' ? '信号経路' : kind.toUpperCase()}: エラー ${r.summary.errors}・警告 ${r.summary.warnings}`);
     return r;
   }
 
@@ -120,15 +121,21 @@ export function createCheckView(ctx) {
   function issueList(r) {
     const s = status(st.tab);
     const list = r.issues.filter((i) => st.filter === 'all' || i.level === st.filter);
-    const where = st.tab === 'erc' ? '回路図' : 'PCB';
+    const where = st.tab === 'drc' ? 'PCB' : '回路図';
     const items = list.map((i, k) => `<li class="issue ${i.level}">
-        <span class="lv">${i.level === 'error' ? '✕' : '!'}</span>
+        <span class="lv">${i.level === 'error' ? '✕' : i.level === 'info' ? 'i' : '!'}</span>
         <span class="msg">${esc(i.message)}</span>
         ${i.at && s !== 'stale' ? `<button class="btn small-btn" data-jump="${r.issues.indexOf(i)}" aria-label="${where}で表示">表示</button>` : ''}
       </li>`).join('');
     const filt = (v, l, n) => `<button class="chip${st.filter === v ? ' on' : ''}" data-filter="${v}">${l} ${n}</button>`;
-    return `<div class="chips">${filt('all', 'すべて', r.issues.length)}${filt('error', 'エラー', r.summary.errors)}${filt('warning', '警告', r.summary.warnings)}</div>` +
+    return `<div class="chips">${filt('all', 'すべて', r.issues.length)}${filt('error', 'エラー', r.summary.errors)}${filt('warning', '警告', r.summary.warnings)}${r.summary.infos != null ? filt('info', 'お知らせ', r.summary.infos) : ''}</div>` +
       (list.length ? `<ul class="issues">${items}</ul>` : `<p class="ok">✓ ${st.filter === 'all' ? '指摘はありません' : '該当なし'}（下の「検査した項目」の範囲で）</p>`);
+  }
+
+  /** 信号経路の一覧（入口 → 出口） */
+  function chainList(r) {
+    const mark = { ok: '<span class="ok">✓</span>', warning: '<b class="warn">!</b>', error: '<b class="err">✕</b>' };
+    return `<ul class="chains">${r.chains.map((c) => `<li class="chain ${c.status}"><div>${mark[c.status] || ''} <b>${esc(c.title)}</b></div><small>${c.path.map(esc).join(' → ')}</small></li>`).join('') || '<li>音声・USB の信号が見つかりません</li>'}</ul>`;
   }
 
   function coverage(r) {
@@ -144,9 +151,9 @@ export function createCheckView(ctx) {
     if (!p) { ctx.root.innerHTML = ''; return; }
     const r = p.checks?.[st.tab];
     ctx.root.innerHTML = `<div class="check-wrap">
-      <div class="check-cards">${summaryCard('erc', 'ERC 電気的ルール', '回路図の未接続ピン・電源・出力の衝突などを検査します')}${summaryCard('drc', 'DRC 基板設計ルール', 'PCB の間隔・配線幅・穴・未配線・シルクなどを検査します')}</div>
-      <h3>${st.tab === 'erc' ? 'ERC' : 'DRC'} の結果</h3>
-      ${r ? issueList(r) + coverage(r) : `<p class="note">まだ実行していません。上の「実行」を押してください。</p>`}
+      <div class="check-cards">${summaryCard('erc', 'ERC 電気的ルール', '回路図の未接続ピン・電源・出力の衝突などを検査します')}${summaryCard('drc', 'DRC 基板設計ルール', 'PCB の間隔・配線幅・穴・未配線・シルクなどを検査します')}${summaryCard('sig', '信号経路（USB・I2S・アナログ音声）', '信号が種類ごとに正しく受け渡され、目的の出力まで届くか（左右・極性・設定ピン・フィルター・レベル）を検査します')}</div>
+      <h3>${{ erc: 'ERC', drc: 'DRC', sig: '信号経路' }[st.tab]} の結果</h3>
+      ${r ? (st.tab === 'sig' ? chainList(r) : '') + issueList(r) + coverage(r) : `<p class="note">まだ実行していません。上の「実行」を押してください。</p>`}
     </div>`;
     ctx.root.querySelectorAll('[data-run]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); run(b.dataset.run); }; });
     ctx.root.querySelector('[data-rules]')?.addEventListener('click', (e) => { e.stopPropagation(); editRules(); });
@@ -154,7 +161,7 @@ export function createCheckView(ctx) {
     ctx.root.querySelectorAll('[data-tab]').forEach((c) => { c.onclick = () => { st.tab = c.dataset.tab; st.filter = 'all'; render(); }; });
     ctx.root.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { st.filter = b.dataset.filter; render(); }; });
     ctx.root.querySelectorAll('[data-jump]').forEach((b) => {
-      b.onclick = () => { const i = r.issues[Number(b.dataset.jump)]; ctx.jump(st.tab === 'erc' ? 'schematic' : 'pcb', i.at, i.message); };
+      b.onclick = () => { const i = r.issues[Number(b.dataset.jump)]; ctx.jump(st.tab === 'drc' ? 'pcb' : 'schematic', i.at, i.message); };
     });
   }
 

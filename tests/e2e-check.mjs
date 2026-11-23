@@ -49,12 +49,12 @@ await page.evaluate(async () => {
   }, 'setup');
 });
 
-await step('検査タブ: 「未実装」表示なし・3ツール有効・未実行表示', async () => {
+await step('検査タブ: 「未実装」表示なし・4ツール有効・未実行表示', async () => {
   await ws('check');
   assert.ok(!(await page.locator('#stage-overlay').isVisible()));
   assert.ok(await page.locator('#check-view').isVisible());
-  assert.equal(await page.locator('#toolbar .tool:not([disabled])').count(), 3);
-  assert.equal(await page.locator('#check-view .badge.planned').count(), 2, 'ERC/DRC とも未実行');
+  assert.equal(await page.locator('#toolbar .tool:not([disabled])').count(), 4);
+  assert.equal(await page.locator('#check-view .badge.planned').count(), 3, 'ERC/DRC/信号経路とも未実行');
   assert.doesNotMatch(await page.locator('#check-view').textContent(), /エラーなし/, '未実行を検査済みと表示しない');
 });
 
