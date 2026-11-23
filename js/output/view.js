@@ -261,7 +261,17 @@ export function createOutputView(ctx) {
     ov.appendChild(frame);
     document.body.appendChild(ov);
     const status = ov.querySelector('.kicanvas-status');
-    const close = () => { window.removeEventListener('message', onMsg); ov.remove(); };
+    const close = () => {
+      window.removeEventListener('message', onMsg);
+      // iframe にあったフォーカスをアプリへ戻す（消えた iframe にフォーカスが残ると、Android の戻るボタンなどのキーがアプリに届かない）
+      try { frame.contentWindow?.blur?.(); } catch { /* 別オリジン */ }
+      frame.blur?.();
+      ov.remove();
+      document.activeElement?.blur?.();
+      document.body.setAttribute('tabindex', '-1');
+      document.body.focus({ preventScroll: true });
+      window.focus();
+    };
     ov.querySelector('[data-close]').onclick = close;
     const result = { stage: 'loading' };
     function onMsg(e) {
