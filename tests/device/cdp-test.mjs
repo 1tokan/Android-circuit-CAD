@@ -76,6 +76,16 @@ const waitIdle = async (ms = 15000) => {
 // 遅いエミュレータでは、起動直後にランチャー（ホーム画面）が「応答なし（ANR）」になり、そのダイアログが前面で
 // 戻るボタンを受け取ってしまう（アプリにも共有シートにも届かない）。試験の前に見つけたら閉じる
 const anrClosed = [];
+const currentFocus = () => (adb('shell', 'dumpsys', 'window', 'windows').split('\n').find((l) => /mCurrentFocus=/.test(l)) || '').trim();
+// アプリが前面の Activity なのに、入力のフォーカスが別の窓（再起動したホーム画面など）にあるとき、アプリを前へ出し直す
+const refocused = [];
+const ensureAppFocus = () => {
+  const f = currentFocus();
+  if (f.includes('jp.tokan.pocketeda') || !appOnTop()) return;
+  refocused.push(f.replace(/^.*mCurrentFocus=/, ''));
+  adb('shell', 'am', 'start', '-n', 'jp.tokan.pocketeda/.MainActivity', '--activity-reorder-to-front');
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+};
 const clearSystemDialogs = () => {
   for (let k = 0; k < 3; k++) {
     const focus = (adb('shell', 'dumpsys', 'window', 'windows').split('\n').find((l) => /mCurrentFocus=/.test(l)) || '').trim();
@@ -89,6 +99,7 @@ const clearSystemDialogs = () => {
 };
 const backUntil = async (cond) => {
   clearSystemDialogs();
+  ensureAppFocus();
   await waitIdle();
   for (let attempt = 0; attempt < 2; attempt++) {
     adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
@@ -231,11 +242,11 @@ await step('Android の戻るボタン: ドロワーを閉じる → 回路図�
   if (await evaluate("document.querySelector('#drawer').hidden")) throw new Error('ドロワーが開かない');
   await shot('03-drawer');
   const r1 = await backUntil("document.querySelector('#drawer').hidden");
-  if (r1 < 0) throw new Error('戻るでドロワーが閉じない（' + wakefulness() + '）');
+  if (r1 < 0) throw new Error('戻るでドロワーが閉じない（' + wakefulness() + '・' + currentFocus() + '）');
   if ((await evaluate('window.pocketEDA.state.workspace')) !== 'pcb') throw new Error('ドロワーを閉じただけで画面が変わった');
   const r2 = await backUntil("window.pocketEDA.state.workspace === 'schematic'");
   if (r2 < 0) throw new Error('戻るで回路図に戻らない: ' + (await evaluate('window.pocketEDA.state.workspace')));
-  return { retried: r1 + r2, idleMs, anrClosed };
+  return { retried: r1 + r2, idleMs, anrClosed, refocused };
 });
 
 await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面を開く）', async () => {
