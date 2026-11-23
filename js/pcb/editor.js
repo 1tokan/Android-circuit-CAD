@@ -8,6 +8,7 @@ import { computePcbConnectivity, snapTarget } from './connectivity.js';
 import { drcRules } from '../check/rules.js';
 import { autoroute } from './autoroute.js';
 import { placeRefdes, refdesConflicts } from './shapes.js';
+import { addStitchVias, planeSplitCrossings } from './stitch.js';
 import { netWidthFor, currentSettings } from '../check/current.js';
 import { renderPcb } from './render.js';
 import { esc } from '../core/util.js';
@@ -103,6 +104,7 @@ export function createPcbEditor(ctx) {
       if (!outside && st.conn?.unrouted) c.push(chip('autoroute', `自動配線（${st.conn.unrouted}）`, true));
       const refBad = outside ? 0 : refdesConflicts(pcb());
       if (refBad) c.push(chip('refdes', `部品番号の位置を整える（${refBad}）`));
+      if (!outside && !st.conn?.unrouted && pcb().zones.some((z) => z.net === 'GND' && (z.layer === 'F.Cu' || z.layer === 'B.Cu'))) c.push(chip('stitch', 'GND のつなぎビア'));
       c.push(chip('multi', st.multi ? '複数選択 ON' : '複数選択', st.multi), layerChip);
       if (st.sel.size) c.push(chip('props', '属性'), chip('rotate', '回転'), chip('flip', '裏返す'), chip('delete', '削除'), chip('clear', '解除'));
       c.push(info);
@@ -137,6 +139,17 @@ export function createPcbEditor(ctx) {
         let r;
         edit((p) => { r = placeRefdes(p); }, '部品番号の位置');
         ctx.ui.toast(r.conflicts.length ? `${r.moved.length}個を動かしました。置き場所が見つからない番号: ${r.conflicts.join(', ')}（部品の間を空けるか、属性で番号を隠してください）` : `${r.moved.length}個の部品番号をパッドに重ならない位置へ動かしました`, !!r.conflicts.length);
+        break;
+      }
+      case 'stitch': {
+        // 表裏の GND のベタを内層とつなぐビア。電源層の分割をまたぐ配線の近くを先に、残りは 3mm 格子
+        const rules = drcRules(ctx.getProject());
+        let r, cross = [];
+        edit((p) => {
+          for (const [sig, plane] of [['B.Cu', 'In2.Cu'], ['F.Cu', 'In1.Cu'], ['B.Cu', 'In1.Cu'], ['F.Cu', 'In2.Cu']]) if (p.zones.some((z) => z.layer === plane)) cross.push(...planeSplitCrossings(p, rules, { signalLayer: sig, planeLayer: plane }));
+          r = addStitchVias(p, rules, { near: cross, nearRadiusMm: 1.5, pitchMm: 3 });
+        }, 'つなぎビア');
+        ctx.ui.toast(`つなぎビアを ${r.added.length} 本打ちました（電源層の分割をまたぐ ${cross.length} か所のうち ${r.nearHit} か所の近く）`);
         break;
       }
       case 'multi': st.multi = !st.multi; break;
