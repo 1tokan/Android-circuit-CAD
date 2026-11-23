@@ -174,7 +174,32 @@ export function fillZone(pcb, z, rules = {}) {
  * 太らせるのは障害物側なので、間隔は狭くならない。
  */
 function safeDifference(base, subs) {
-  try { return pc.difference(base, ...subs); } catch { /* 1つずつにする */ }
+  try { return pc.difference(base, ...subs); } catch { /* 区画に分けて引く */ }
+  // 基板をいくつかの区画に分け、区画ごとにその区画にかかる障害物だけを引く（失敗の起きる所を狭くし、1 つずつ引く所を減らす）。
+  // 区画どうしは少し重ねて切り、最後にまとめる（つなぎ目に切れ目を作らない）
+  const bb = bboxOf(base);
+  const nx = Math.max(1, Math.ceil((bb.x1 - bb.x0) / 8)), ny = Math.max(1, Math.ceil((bb.y1 - bb.y0) / 8));
+  const sx = (bb.x1 - bb.x0) / nx, sy = (bb.y1 - bb.y0) / ny, ov = 0.05;
+  const sb = subs.map((q) => bboxOf(q));
+  const pieces = [];
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const r = { x0: bb.x0 + i * sx - ov, y0: bb.y0 + j * sy - ov, x1: bb.x0 + (i + 1) * sx + ov, y1: bb.y0 + (j + 1) * sy + ov };
+    const rect = [[[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1], [r.x0, r.y0]]];
+    let piece = pc.intersection(base, rect);
+    if (!piece.length) continue;
+    const local = subs.filter((_, k) => sb[k].x1 >= r.x0 && sb[k].x0 <= r.x1 && sb[k].y1 >= r.y0 && sb[k].y0 <= r.y1);
+    piece = diffOneByOne(piece, local, true);
+    if (piece.length) pieces.push(piece);
+  }
+  if (!pieces.length) return [];
+  try { return pc.union(...pieces); } catch { /* まとめるのに失敗したら 1 つずつ足す */ }
+  let out = pieces[0];
+  for (const p of pieces.slice(1)) out = pc.union(out, p.map((poly) => grow(poly, 0.0002)));
+  return out;
+}
+/** まとめて引き、失敗したら 1 つずつ（失敗した障害物はほんの少し太らせて）引く */
+function diffOneByOne(base, subs, tryBatch = false) {
+  if (tryBatch && subs.length) { try { return pc.difference(base, ...subs); } catch { /* 1 つずつ */ } }
   let out = base;
   for (const s of subs) {
     if (!out.length) break;
@@ -185,6 +210,12 @@ function safeDifference(base, subs) {
     if (!ok) throw new Error('ベタの計算に失敗しました（形が複雑すぎます）');
   }
   return out;
+}
+function bboxOf(mp) {
+  const b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  const walk = (a) => { if (typeof a[0] === 'number') { b.x0 = Math.min(b.x0, a[0]); b.x1 = Math.max(b.x1, a[0]); b.y0 = Math.min(b.y0, a[1]); b.y1 = Math.max(b.y1, a[1]); } else for (const q of a) walk(q); };
+  walk(mp);
+  return b;
 }
 /** 多角形を重心から外へ d だけ広げる（凸形の障害物用の近似） */
 function grow(poly, d) {

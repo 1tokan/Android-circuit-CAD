@@ -27,7 +27,7 @@ import { moduleById } from './modules/registry.js';
 import { esc } from './core/util.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.12.1';
+const APP_VERSION = '0.12.2';
 
 const state = {
   project: null,
