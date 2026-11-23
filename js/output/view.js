@@ -194,12 +194,15 @@ export function createOutputView(ctx) {
     });
   }
 
-  /** KiCad 用の書き出し（PCB） */
+  /** KiCad 用の書き出し（回路図・PCB・ライブラリ・3D） */
   function kicadHtml(pcb, nL) {
-    const base = String(ctx.getProject().name).replace(/[\\/:*?"<>|\s]+/g, '_') || 'board';
+    const prj = ctx.getProject();
+    const base = String(prj.name).replace(/[\\/:*?"<>|\s]+/g, '_') || 'board';
+    const sheet = prj.schematic.sheets[0];
+    const nComp = sheet.components.filter((c) => !/^#/.test(c.ref) && !['power', 'gnd'].includes(c.kind)).length;
     return `<div class="check-card on">
-        <div class="check-card-head"><b>KiCad 用（PCB）</b></div>
-        <small>${nL}層・部品 ${pcb.footprints.length}・配線 ${pcb.tracks.length}・ビア ${pcb.vias.length}・ベタ ${pcb.zones.length}・取付穴 ${pcb.holes.length}</small>
+        <div class="check-card-head"><b>KiCad プロジェクト一式</b></div>
+        <small>回路図: 部品 ${nComp}・配線 ${sheet.wires.length}・ラベル ${(sheet.labels || []).length}／PCB: ${nL}層・部品 ${pcb.footprints.length}・配線 ${pcb.tracks.length}・ビア ${pcb.vias.length}・ベタ ${pcb.zones.length}・取付穴 ${pcb.holes.length}</small>
         <div class="check-card-actions"><button class="btn primary" data-kicad>KiCad 用 ZIP を書き出す</button></div>
       </div>
       <div class="check-card">
@@ -208,17 +211,25 @@ export function createOutputView(ctx) {
         <div class="check-card-actions"><button class="btn" data-kicanvas>KiCanvas で表示</button></div>
       </div>
       <details open><summary>入っているファイル</summary><ul class="cover wide">
-        <li><span>.kicad_pcb</span>基板（部品の形・パッド・ネット・配線・ビア・ベタの外形・取付穴・シルク・外形）</li>
-        <li><span>.kicad_pro</span>設計ルール（最小配線幅・間隔・ビア・穴など）とネットクラス</li>
+        <li><span>.kicad_pro</span>プロジェクト（設計ルール・ネットクラス）。これを開く</li>
+        <li><span>.kicad_sch</span>回路図（部品・配線・ネットラベル・電源記号・未接続マーク）</li>
+        <li><span>.kicad_pcb</span>基板（部品・パッド・ネット・配線・ビア・ベタの外形・取付穴・シルク・外形）</li>
         <li><span>.kicad_dru</span>KiCad の基本設定で表せないルール（パッドと配線の間隔・異なるネットの穴・内層と外形）</li>
+        <li><span>PocketEDA.kicad_sym</span>回路図で使っているシンボル</li>
+        <li><span>PocketEDA.pretty</span>基板で使っているフットプリント（部品ごとの .kicad_mod）</li>
+        <li><span>PocketEDA.3dshapes</span>3D モデル（.wrl。Pocket EDA の 3D 表示と同じ簡易形状）</li>
+        <li><span>*-lib-table</span>上の 2 つのライブラリをこのプロジェクトに登録する表（KiCad が自動で読む）</li>
       </ul></details>
       <details open><summary>KiCad での確かめ方</summary><ol class="howto">
-        <li>ZIP を展開し、フォルダごとパソコンへ（3 つのファイルを同じフォルダに置いたまま）</li>
-        <li>KiCad で ${esc(base)}.kicad_pro を開き、PCB エディタを開く（KiCad 7 の形式。8・9 でも開けます）</li>
-        <li>ベタは外形だけが入っています。「編集 → すべてのゾーンを塗りつぶす」（B キー）で塗る</li>
-        <li>「検査 → デザインルールチェッカー」で DRC を実行（回路図は入っていないので「回路図と PCB の整合」は対象外）</li>
+        <li>ZIP を展開し、フォルダごとパソコンへ（中のファイル・フォルダは同じ場所に置いたまま）</li>
+        <li>KiCad で ${esc(base)}.kicad_pro を開く（KiCad 7 の形式。8・9 でも開けます）。回路図エディタ・PCB エディタ・3D ビューアが使えます</li>
+        <li>PCB のベタは外形だけが入っています。PCB エディタの「編集 → すべてのゾーンを塗りつぶす」（B キー）で塗る</li>
+        <li>PCB エディタの「検査 → デザインルールチェッカー」で DRC（「回路図と PCB の整合をテスト」も使えます）</li>
       </ol>
-      <p class="note">KiCad 7.0.11 で読み込み、パッドの位置・ネット・配線・ビア・ベタの数が一致することを確かめています。KiCad の DRC は Pocket EDA が調べない項目（サーマルのスポーク数・シルクと外形の間隔・コートヤードの重なりなど）も出します。回路図（.kicad_sch）はまだ書き出せません。</p></details>`;
+      <p class="note">KiCad 7.0.11 で確かめていること: 回路図から KiCad が作るネットリストが Pocket EDA のネットリストとつながり・ネット名まで一致／基板のパッドの位置・ネットと回路図の一致／基板の各部品がライブラリの .kicad_mod と一致（KiCad のライブラリ照合で差なし）／3D モデルのファイルがそろっている。
+      KiCad のネット名の決まりに合わせるため、ネットラベルのネットは先頭に「/」が付きます（例: /I2S_BCLK）。
+      3D モデルは実物の形ではなく、Pocket EDA の 3D 表示と同じ箱・円柱の簡易形状です（LCSC の 3D モデルは公式の取得方法が無いため入れていません）。
+      KiCad の DRC は Pocket EDA が調べない項目（サーマルのスポーク数・シルクと外形の間隔・コートヤードの重なりなど）も出します。</p></details>`;
   }
 
   async function exportKicad() {
@@ -237,7 +248,8 @@ export function createOutputView(ctx) {
     const p = ctx.getProject(), pcb = ctx.getPcb();
     if (!pcb.footprints.length) { ctx.toast('PCB に部品がありません', true); return null; }
     const files = kicadFiles({ ...p, pcb }, { version: ctx.version });
-    const fileName = files[0].name.split('/').pop();
+    const pcbFile = files.find((f) => f.name.endsWith('.kicad_pcb'));
+    const fileName = pcbFile.name.split('/').pop();
     document.querySelector('.kicanvas-overlay')?.remove();
     const ov = document.createElement('div');
     ov.className = 'kicanvas-overlay';
@@ -245,7 +257,7 @@ export function createOutputView(ctx) {
     const frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('title', 'KiCanvas');
-    frame.srcdoc = kicanvasPage(files[0].content, fileName);
+    frame.srcdoc = kicanvasPage(pcbFile.content, fileName);
     ov.appendChild(frame);
     document.body.appendChild(ov);
     const status = ov.querySelector('.kicanvas-status');

@@ -163,16 +163,19 @@ await step('部品実装: +90 で手動補正すると CPL の回転が変わり
   assert.equal(await page.evaluate(() => window.pocketEDA.state.project.pcb.footprints.find((q) => q.ref === 'R1').cplRotOffset), undefined);
 });
 
-await step('KiCad: タブから .kicad_pcb・.kicad_pro・.kicad_dru の ZIP を書き出す', async () => {
+await step('KiCad: タブから KiCad プロジェクト一式（回路図・PCB・ライブラリ・3D）の ZIP を書き出す', async () => {
   const [k] = await Promise.all([page.waitForEvent('download'), tool('kicad')]);
   assert.equal(k.suggestedFilename(), 'LED_Test-kicad.zip');
   const path = `${OUT}/LED_Test-kicad.zip`;
   await k.saveAs(path);
   const buf = fs.readFileSync(path);
   assert.equal(buf.readUInt32LE(0), 0x04034b50);
-  assert.equal(buf.readUInt16LE(buf.length - 22 + 10), 3);
+  assert.ok(buf.readUInt16LE(buf.length - 22 + 10) >= 12, 'プロジェクト・回路図・基板・ルール・ライブラリ表・シンボル・フットプリント・3D');
   const s = buf.toString('utf8');
-  assert.match(s, /LED_Test\/LED_Test\.kicad_pcb/);
+  for (const f of ['LED_Test.kicad_pro', 'LED_Test.kicad_pcb', 'LED_Test.kicad_sch', 'LED_Test.kicad_dru', 'PocketEDA.kicad_sym', 'sym-lib-table', 'fp-lib-table']) assert.ok(s.includes(`LED_Test/${f}`), f);
+  assert.match(s, /LED_Test\/PocketEDA\.pretty\/R_0805\.kicad_mod/);
+  assert.match(s, /LED_Test\/PocketEDA\.3dshapes\/R_0805\.wrl/);
+  assert.match(s, /\(kicad_sch \(version 20230121\) \(generator pocket_eda\)/);
   assert.match(s, /\(kicad_pcb \(version 20221018\) \(generator pocket_eda\)/);
   assert.match(await page.locator('#output-view').textContent(), /KiCad で確かめ方|KiCad での確かめ方/);
   await page.screenshot({ path: `${OUT}/output-kicad-phone.png` });

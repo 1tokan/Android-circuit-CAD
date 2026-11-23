@@ -25,13 +25,14 @@ test('サンプル: .kicad_pcb の中身の数がプロジェクトと一致す�
   const prj = sample();
   const pcb = M.pcb.ensurePcb(prj);
   const files = K.kicadFiles(prj, { version: 't' });
-  assert.deepEqual(files.map((f) => f.name.split('.').pop()), ['kicad_pcb', 'kicad_pro', 'kicad_dru']);
-  const t = files[0].content;
+  const byExt = (e) => files.find((f) => f.name.endsWith(e));
+  for (const e of ['.kicad_pro', '.kicad_pcb', '.kicad_sch', '.kicad_dru', '/PocketEDA.kicad_sym', '/sym-lib-table', '/fp-lib-table']) assert.ok(byExt(e), e);
+  const t = byExt('.kicad_pcb').content;
   assert.ok(t.startsWith(`(kicad_pcb (version ${K.KICAD_PCB_VERSION}) (generator pocket_eda)`));
   assert.ok(balanced(t), '括弧が対応している');
   const count = (re) => (t.match(re) || []).length;
   assert.equal(count(/^ {2}\(footprint "PocketEDA:(?!MountingHole_NPTH)/gm), pcb.footprints.length);
-  assert.equal(count(/^ {2}\(footprint "PocketEDA:MountingHole_NPTH"/gm), pcb.holes.length);
+  assert.equal(count(/^ {2}\(footprint "PocketEDA:MountingHole_NPTH_[\d.]+mm"/gm), pcb.holes.length);
   assert.equal(count(/^ {2}\(segment /gm), pcb.tracks.length);
   assert.equal(count(/^ {2}\(via /gm), pcb.vias.length);
   assert.equal(count(/^ {2}\(zone /gm), pcb.zones.length);
@@ -40,19 +41,19 @@ test('サンプル: .kicad_pcb の中身の数がプロジェクトと一致す�
   assert.match(t, /\(1 "In1\.Cu" signal\)\n {4}\(2 "In2\.Cu" signal\)\n {4}\(31 "B\.Cu" signal\)/);
   // ネット: 全ネットが番号つきで並ぶ。配線のネット番号は表のとおり
   const nets = new Map([...t.matchAll(/^ {2}\(net (\d+) "([^"]*)"\)/gm)].map((m) => [m[2], Number(m[1])]));
-  for (const tr of pcb.tracks) assert.ok(nets.has(tr.net), tr.net);
+  for (const tr of pcb.tracks) assert.ok(nets.has(tr.net) || nets.has(`/${tr.net}`), tr.net); // ネットラベルのネットは KiCad と同じく / が付く
   const gnd = nets.get('GND');
   assert.ok(t.includes(`(net ${gnd}) (tstamp`), 'GND の配線がある');
   // 設計ルール
-  const pro = JSON.parse(files[1].content);
+  const pro = JSON.parse(byExt('.kicad_pro').content);
   const R = M.drc.drcRules(prj);
   assert.equal(pro.board.design_settings.rules.min_clearance, R.minClearanceMm);
   assert.equal(pro.board.design_settings.rules.min_track_width, R.minTrackWidthMm);
   assert.equal(pro.board.design_settings.rules.min_hole_to_hole, R.minSameNetHoleMm);
-  assert.ok(balanced(files[2].content));
-  assert.match(files[2].content, /constraint clearance \(min 0\.2mm\)/);
+  assert.ok(balanced(byExt('.kicad_dru').content));
+  assert.match(byExt('.kicad_dru').content, /constraint clearance \(min 0\.2mm\)/);
   // 同じ設計からは同じファイル（tstamp が決まった値）
-  assert.equal(K.kicadFiles(prj, { version: 't' })[0].content, t);
+  assert.equal(K.kicadFiles(prj, { version: 't' }).find((f) => f.name.endsWith('.kicad_pcb')).content, t);
 });
 
 test('裏面・回転した部品: KiCad の変換で戻すとパッドの位置が一致する', () => {
@@ -113,4 +114,82 @@ test('同じネットで近すぎるビア: DRC が見つけ、まとめると�
   const d2 = M.drc.runDrc(prj, pcb);
   assert.equal(d2.summary.errors, 0);
   assert.equal(d2.summary.unrouted, 0);
+});
+
+test('一式: ライブラリ・3D モデル・回路図とのつながり', () => {
+  const prj = sample();
+  const pcb = M.pcb.ensurePcb(prj);
+  const files = K.kicadFiles(prj, { version: 't' });
+  const pcbText = files.find((f) => f.name.endsWith('.kicad_pcb')).content;
+  const sch = files.find((f) => f.name.endsWith('.kicad_sch')).content;
+  const symLib = files.find((f) => f.name.endsWith('.kicad_sym')).content;
+  for (const f of files.filter((x) => /\.(kicad_pcb|kicad_sch|kicad_sym|kicad_mod)$|lib-table$/.test(x.name))) assert.ok(balanced(f.content), f.name);
+  // 基板の部品はすべてライブラリにある名前・3D モデルもある
+  const mods = new Set(files.filter((f) => f.name.endsWith('.kicad_mod')).map((f) => f.name.split('/').pop().replace('.kicad_mod', '')));
+  const wrls = new Set(files.filter((f) => f.name.endsWith('.wrl')).map((f) => f.name.split('/').pop().replace('.wrl', '')));
+  const used = [...pcbText.matchAll(/^ {2}\(footprint "PocketEDA:([^"]+)"/gm)].map((m) => m[1]);
+  assert.equal(used.length, pcb.footprints.length + pcb.holes.length);
+  for (const u of used) assert.ok(mods.has(u), u);
+  for (const m of pcbText.matchAll(/\(model "\$\{KIPRJMOD\}\/PocketEDA\.3dshapes\/([^"]+)\.wrl"/g)) assert.ok(wrls.has(m[1]), m[1]);
+  assert.ok(wrls.size >= 10);
+  // 回路図の部品（電源記号を除く）は基板の部品とパス（シンボルの uuid）でつながる
+  const symUuids = new Set([...sch.matchAll(/\(symbol \(lib_id "PocketEDA:(?!PWR_)[^"]+"\)[\s\S]*?\(uuid ([0-9a-f-]+)\)/g)].map((m) => m[1]));
+  const paths = [...pcbText.matchAll(/\(path "\/([0-9a-f-]+)"\)/g)].map((m) => m[1]);
+  assert.equal(paths.length, pcb.footprints.length);
+  for (const pth of paths) assert.ok(symUuids.has(pth), pth);
+  // 回路図の Footprint 欄はライブラリの名前
+  for (const m of sch.matchAll(/\(property "Footprint" "PocketEDA:([^"]+)"/g)) assert.ok(mods.has(m[1]), m[1]);
+  // 回路図に埋め込んだシンボルとライブラリのシンボルは同じ名前の集まり
+  const inSch = new Set([...sch.matchAll(/^ {4}\(symbol "PocketEDA:([^"]+)"/gm)].map((m) => m[1]));
+  const inLib = new Set([...symLib.matchAll(/^ {2}\(symbol "([^"]+)"/gm)].map((m) => m[1]));
+  assert.deepEqual([...inSch].sort(), [...inLib].sort());
+  // ネットラベルのネットは KiCad と同じく / から始まる名前、電源はそのまま
+  assert.match(pcbText, /\(net \d+ "\/I2S_BCLK"\)/);
+  assert.match(pcbText, /\(net \d+ "GND"\)/);
+  assert.match(pcbText, /\(net \d+ "\+3V3"\)/);
+});
+
+test('回路図の向き: Pocket EDA の回転・反転 → KiCad の角度・mirror', async () => {
+  const S = await import('../js/output/kicad-sch.js');
+  // KiCad 7.0.11 で全種類のピン位置を確かめた対応（反転ありは回転の向きが逆）
+  assert.deepEqual(S.kicadOrient({ rot: 90, mirror: false }), { angle: 270, mirror: false });
+  assert.deepEqual(S.kicadOrient({ rot: 90, mirror: true }), { angle: 90, mirror: true });
+  assert.deepEqual(S.kicadOrient({ rot: 180, mirror: true }), { angle: 180, mirror: true });
+  assert.deepEqual(S.kicadOrient({ rot: 0, mirror: false }), { angle: 0, mirror: false });
+  // SVG のパス → 折れ線（相対の円弧・2 次曲線・閉じる）
+  const polys = S.flattenPath('M-2.4 0 a0.6 0.6 0 0 1 1.2 0 Q0 1 1 0 Z');
+  assert.equal(polys.length, 1);
+  const last = polys[0].at(-1);
+  assert.deepEqual([last.x, last.y], [-2.4, 0], 'Z で始点へ戻る');
+  assert.ok(polys[0].some((p) => p.y < -0.5), '円弧は上へふくらむ（sweep=1）');
+});
+
+test('名前の無いネット: KiCad と同じ名前（受動以外のピンを優先・文字列順）', async () => {
+  const S = await import('../js/output/kicad-sch.js');
+  const prj = M.project.createProject('n');
+  const sh = prj.schematic.sheets[0];
+  const r1 = M.model.addComponent(sh, 'resistor', 20, 10), r2 = M.model.addComponent(sh, 'resistor', 40, 10);
+  M.model.addWirePath(sh, [{ x: 24, y: 10 }, { x: 36, y: 10 }]);
+  const op = M.model.addComponent(sh, 'opamp', 80, 10);
+  const c1 = M.model.addComponent(sh, 'capacitor', 100, 20);
+  M.model.addWirePath(sh, [{ x: 86, y: 10 }, { x: 98, y: 10 }, { x: 98, y: 20 }]);
+  const built = S.buildSymbols(prj);
+  const names = S.kicadNetNames(prj, built);
+  const byPad = (ref, pad) => names.byPad.get(`${ref}:${pad}`);
+  assert.equal(byPad(r1.ref, '2'), `Net-(${r1.ref}-Pad2)`, 'R1 < R2 の文字列順');
+  assert.equal(byPad(c1.ref, '1'), `Net-(${op.ref}-OUT)`, '受動のコンデンサより出力ピン');
+  assert.equal(byPad(r1.ref, '1'), `unconnected-(${r1.ref}-Pad1)`);
+  assert.equal(byPad(op.ref, '3'), `unconnected-(${op.ref}-+-Pad3)`);
+});
+
+test('3D モデル（VRML）: 箱と円柱、単位 0.1 インチ', async () => {
+  const { vrmlModel } = await import('../js/output/vrml.js');
+  const fp = M.fps.getFootprint('R_0805');
+  const w = vrmlModel(fp, '10k');
+  assert.match(w, /^#VRML V2\.0 utf8/);
+  assert.equal((w.match(/Shape \{/g) || []).length, 3, '本体と両端の電極');
+  // 本体の長さ 2mm × 0.7 = 1.4mm → 0.5512 単位（x は ±0.2756）
+  assert.match(w, /-0\.27559 /);
+  const dip = vrmlModel(M.fps.getFootprint('DIP-8'), '');
+  assert.ok((dip.match(/Shape \{/g) || []).length >= 9, '本体＋ピン 8 本');
 });

@@ -9,9 +9,9 @@ import { buildPlot } from '../output/plot.js';
 import { COLORS } from '../output/fabspec.js';
 import { toMm, fpToBoard } from '../pcb/model.js';
 import { esc } from '../core/util.js';
+import { partPrims } from './parts3d.js';
 
 const FR4 = '#c9b27c';
-const DARK = '#1c1c1e';
 
 // ---------------- 面の画像（製造データをそのまま描く） ----------------
 function drawPrims(g, prims, color) {
@@ -123,97 +123,24 @@ function mat(color, opt = {}) {
   if (!MAT[k]) MAT[k] = new THREE.MeshStandardMaterial({ color, roughness: 0.6, ...opt });
   return MAT[k];
 }
-const METAL = () => mat('#d8d8d8', { metalness: 0.8, roughness: 0.3 });
-const GOLD = () => mat('#d4af37', { metalness: 0.9, roughness: 0.25 });
-
-/** パッケージから高さ・色・形を決める */
-function partStyle(f) {
-  const id = String(f.fpDef.id), pkg = String(f.fpDef.package || id).toUpperCase(), v = String(f.value || '').toUpperCase();
-  // 線をはんだ付けするパッド・テストパッドは部品が載らない（パッドだけ見せる）
-  if (/^(SolderWirePad|TestPad|SolderJumper)/i.test(id)) return { none: true };
-  if (/^R_\d/.test(id)) return { h: 0.45, color: '#1d1d1d', ends: true };
-  if (/^C_\d/.test(id)) return { h: 0.6, color: '#b8946a', ends: true };
-  if (/^L_\d/.test(id)) return { h: 0.6, color: '#3a3a3a', ends: true };
-  if (/^LED_/.test(id)) return { h: 0.6, color: /GREEN|緑/.test(v) ? '#47d16b' : /BLUE|青/.test(v) ? '#4a86ff' : /YELLOW|黄/.test(v) ? '#ffd23f' : /WHITE|白/.test(v) ? '#f3f3f3' : '#ff3b30', ends: true, glow: true };
-  if (/^CP_ELEC/.test(id.toUpperCase())) return { cyl: true, h: 5.4, color: '#c8c8cc' };
-  if (/^PINHEADER/.test(id.toUpperCase())) return { header: true, h: 2.5, color: '#111' };
-  if (/^JST_PH/.test(id.toUpperCase())) return { h: /HORIZONTAL/i.test(id) ? 4.8 : 6.0, color: '#efe6cf' };
-  if (/^SW_PUSH/.test(id.toUpperCase())) return { h: 3.5, color: '#202020', button: true };
-  if (/^DIP/.test(pkg)) return { h: 3.3, lift: 0.5, color: DARK, pin1: true };
-  if (/SOT-?223|DPAK|TO-252/.test(pkg)) return { h: 1.6, color: DARK, pin1: true };
-  if (/SOT|SOD|SC-?70/.test(pkg)) return { h: 1.0, color: DARK, pin1: /SOT/.test(pkg) };
-  if (/SMA|SMB|SMC/.test(pkg)) return { h: 2.1, color: DARK, band: true };
-  if (/QFN|DFN|LGA|SON/.test(pkg)) return { h: 0.85, color: DARK, pin1: true };
-  if (/QFP/.test(pkg)) return { h: 1.4, color: DARK, pin1: true };
-  if (/SSOP|TSSOP|MSOP/.test(pkg)) return { h: 1.1, color: DARK, pin1: true };
-  if (/SOIC|SOP/.test(pkg)) return { h: 1.5, color: DARK, pin1: true };
-  if (/TRIMMER/.test(id.toUpperCase())) return { h: 4.5, color: '#3a5bd6' };
-  return { h: 1.0, color: '#555' };
-}
-
+/** 部品の簡易形状（parts3d.js の形のリスト）を three のメッシュにする */
 function buildPart(f, t) {
   const g = new THREE.Group();
-  const s = partStyle(f);
-  const b = f.fpDef.body || { w: 1, h: 1 };
   const bottom = f.side === 'bottom';
   const dir = bottom ? -1 : 1;
   const surface = (t / 2 + 0.03) * dir;
-  const at = (lx, ly) => fpToBoard(f, lx, ly);
   const rotY = -((f.rot || 0) * Math.PI) / 180;
-  const box = (w, d, h, material, lx, ly, z0) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
-    const c = at(lx, ly);
-    m.position.set(c.x, surface + dir * (z0 + h / 2), c.y);
-    m.rotation.y = rotY;
+  for (const p of partPrims(f.fpDef, f.value, t)) {
+    const { color, ...opt } = p.m;
+    const material = mat(color, opt);
+    const c = fpToBoard(f, p.x, p.y);
+    const m = p.k === 'box'
+      ? new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), material)
+      : new THREE.Mesh(new THREE.CylinderGeometry(p.r, p.r, p.h, p.seg), material);
+    m.position.set(c.x, surface + dir * (p.z0 + p.h / 2), c.y);
+    if (p.k === 'box') m.rotation.y = rotY;
     g.add(m);
-    return m;
-  };
-  const cyl = (r, h, material, lx, ly, z0, seg = 24) => {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), material);
-    const c = at(lx, ly);
-    m.position.set(c.x, surface + dir * (z0 + h / 2), c.y);
-    g.add(m);
-    return m;
-  };
-  const cx = b.cx || 0, cy = b.cy || 0;
-  if (s.none) return g;
-  if (s.cyl) {
-    box(b.w, b.h, 0.6, mat('#1b1b1b'), cx, cy, 0);
-    cyl(Math.min(b.w, b.h) / 2 * 0.95, s.h - 0.6, mat(s.color, { metalness: 0.6, roughness: 0.35 }), cx, cy, 0.6);
-  } else if (s.header) {
-    const tht = f.fpDef.pads.filter((p) => p.type === 'tht');
-    for (const p of tht) {
-      box(2.5, 2.5, s.h, mat(s.color), p.x, p.y, 0);
-      box(0.64, 0.64, 6, GOLD(), p.x, p.y, s.h);
-    }
-  } else if (s.ends) {
-    // チップ部品: 本体＋両端の電極
-    const L = b.w, W = b.h;
-    box(L * 0.7, W, s.h, s.glow ? mat(s.color, { emissive: s.color, emissiveIntensity: 0.35, transparent: true, opacity: 0.9 }) : mat(s.color), cx, cy, 0);
-    box(L * 0.15, W, s.h, METAL(), cx - L * 0.425, cy, 0);
-    box(L * 0.15, W, s.h, METAL(), cx + L * 0.425, cy, 0);
-  } else {
-    box(b.w, b.h, s.h, mat(s.color), cx, cy, s.lift || 0);
-    if (s.button) cyl(1.75, 1.5, mat('#3a3a3a'), cx, cy, s.h);
-    if (s.pin1) {
-      const p1 = f.fpDef.pads.find((p) => p.num === '1');
-      if (p1) {
-        // 1番ピン側の本体の角に印
-        const mx = cx + Math.sign(p1.x - cx || -1) * (b.w / 2 - 0.4), my = cy + Math.sign(p1.y - cy || -1) * (b.h / 2 - 0.4);
-        cyl(0.22, 0.02, mat('#bbbbbb'), mx, my, (s.lift || 0) + s.h);
-      }
-    }
-    if (s.band) box(b.w * 0.12, b.h, 0.02, mat('#cfcfcf'), cx + b.w * 0.3, cy, s.h);
-    // 本体の外に出ているパッドにはリード（SMD）
-    for (const p of f.fpDef.pads) {
-      if (p.type === 'tht') continue;
-      const outside = Math.abs(p.x - cx) > b.w / 2 - 0.05 || Math.abs(p.y - cy) > b.h / 2 - 0.05;
-      if (outside) box(Math.min(p.w, p.h) < 0.8 ? p.w * 0.6 : p.w * 0.5, Math.min(p.w, p.h) < 0.8 ? p.h * 0.6 : p.h * 0.5, 0.2, METAL(), p.x, p.y, 0);
-    }
   }
-  // スルーホールのピンが反対面に出る
-  for (const p of f.fpDef.pads) if (p.type === 'tht' && !s.header) cyl(p.drill / 2 * 0.8, t + 2.5, METAL(), p.x, p.y, -t - 1.5, 10);
-  for (const p of f.fpDef.pads) if (p.type === 'tht' && s.header) cyl(0.32, t + 2.5, GOLD(), p.x, p.y, -t - 2.5, 8);
   return g;
 }
 
