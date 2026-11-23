@@ -28,7 +28,7 @@ import { esc } from './core/util.js';
 import { log as alog, logError, projectSummary, installErrorHooks, getLog, clearLog, formatLog, flushLog } from './core/applog.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.12.5';
+const APP_VERSION = '0.12.6';
 
 const state = {
   project: null,
@@ -927,6 +927,7 @@ async function boot() {
     getPcb: () => ensurePcb(state.project),
     version: APP_VERSION,
     toast, ask, download, fmtTime,
+    log: (kind, msg, data) => alog(kind, msg, data),
     runDrc: () => state.checkView.run('drc', { quiet: true }),
     editPcb: (fn, label) => editPcb(fn, label),
     mutate: (fn, reason) => mutateProject(fn, reason),

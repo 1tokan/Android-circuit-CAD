@@ -489,3 +489,10 @@ button { font: inherit; color: inherit; }
 .chain small { display: block; margin-top: 2px; opacity: .8; overflow-wrap: anywhere; line-height: 1.5; }
 .log-view { max-height: 55vh; overflow: auto; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; background: var(--bg2, #10141b); padding: 8px; border-radius: 8px; }
 .cover.wide li { grid-template-columns: 92px minmax(0, 1fr); }
+.kicanvas-overlay { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg, #111); }
+.kicanvas-overlay iframe { flex: 1; width: 100%; border: 0; background: #1b1f23; }
+.kicanvas-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); border-bottom: 1px solid var(--line, #333); }
+.kicanvas-status { font-size: 13px; margin-top: 2px; color: var(--muted, #aaa); }
+.kicanvas-status.ok { color: var(--ok, #4ade80); }
+.kicanvas-status.ng { color: var(--err, #f87171); }
+.kicanvas-bar > .btn { flex-shrink: 0; white-space: nowrap; }

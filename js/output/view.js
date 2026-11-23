@@ -5,6 +5,7 @@ import { layerName } from '../pcb/model.js';
 import { gerberFiles } from './gerber.js';
 import { makeZip } from './zip.js';
 import { kicadFiles } from './kicad.js';
+import { kicanvasPage, compareCounts } from './kicanvas.js';
 import { drcStatus } from '../check/drc.js';
 import { buildAssembly, bomCsv, cplCsv, pcbaService } from './assembly.js';
 import { lcscUrl } from '../library/parts.js';
@@ -115,7 +116,7 @@ export function createOutputView(ctx) {
     const chips = ORDER.filter((id) => id === 'drill' || plot.layers[id]).map((id) => `<button class="chip${st.show.has(id) ? ' on' : ''}" data-layer="${id}"><i style="background:${PREVIEW[id].color}"></i>${PREVIEW[id].label}</button>`).join('');
     const files = st.last ? `<details open><summary>前回書き出したファイル（${st.last.files.length}）</summary><ul class="files">${st.last.files.map((f) => `<li><span>${esc(f.name)}</span><small>${(f.content.length / 1024).toFixed(1)} KB</small></li>`).join('')}</ul><p class="note">${esc(ctx.fmtTime(st.last.at))}・ZIP ${(st.last.size / 1024).toFixed(1)} KB</p></details>` : '';
     const tabs = `<div class="chips seg">${[['gerber', '基板（Gerber）'], ['asm', '部品実装（BOM・CPL）'], ['kicad', 'KiCad']].map(([k, l]) => `<button class="chip${st.tab === k ? ' on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
-    if (st.tab === 'kicad') { ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}${kicadHtml(pcb, nL)}</div>`; bindCommon(); ctx.root.querySelector('[data-kicad]').onclick = () => exportKicad(); return; }
+    if (st.tab === 'kicad') { ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}${kicadHtml(pcb, nL)}</div>`; bindCommon(); ctx.root.querySelector('[data-kicad]').onclick = () => exportKicad(); ctx.root.querySelector('[data-kicanvas]').onclick = () => openKicanvas(); return; }
     if (st.tab === 'asm') { ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}${assemblyHtml()}</div>`; bindCommon(); bindAssembly(); return; }
     ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}
       <div class="check-card on">
@@ -201,6 +202,11 @@ export function createOutputView(ctx) {
         <small>${nL}層・部品 ${pcb.footprints.length}・配線 ${pcb.tracks.length}・ビア ${pcb.vias.length}・ベタ ${pcb.zones.length}・取付穴 ${pcb.holes.length}</small>
         <div class="check-card-actions"><button class="btn primary" data-kicad>KiCad 用 ZIP を書き出す</button></div>
       </div>
+      <div class="check-card">
+        <div class="check-card-head"><b>スマホで KiCad 形式を読み直す（KiCanvas）</b></div>
+        <small>書き出す .kicad_pcb を、Pocket EDA とは別に作られた KiCad ビューア KiCanvas に読ませて表示し、読めた部品・配線・ビア・ベタの数を照合します。KiCanvas 本体を kicanvas.org から読み込むのでネット接続が要ります（設計のデータは送りません）。</small>
+        <div class="check-card-actions"><button class="btn" data-kicanvas>KiCanvas で表示</button></div>
+      </div>
       <details open><summary>入っているファイル</summary><ul class="cover wide">
         <li><span>.kicad_pcb</span>基板（部品の形・パッド・ネット・配線・ビア・ベタの外形・取付穴・シルク・外形）</li>
         <li><span>.kicad_pro</span>設計ルール（最小配線幅・間隔・ビア・穴など）とネットクラス</li>
@@ -224,6 +230,58 @@ export function createOutputView(ctx) {
     await ctx.download(name, zip, 'application/zip');
     ctx.toast(`${name} を書き出しました（KiCad で .kicad_pro を開いてください）`);
     return { files, zip, name };
+  }
+
+  /** KiCanvas で読み直す（全画面。sandbox の iframe） */
+  function openKicanvas() {
+    const p = ctx.getProject(), pcb = ctx.getPcb();
+    if (!pcb.footprints.length) { ctx.toast('PCB に部品がありません', true); return null; }
+    const files = kicadFiles({ ...p, pcb }, { version: ctx.version });
+    const fileName = files[0].name.split('/').pop();
+    document.querySelector('.kicanvas-overlay')?.remove();
+    const ov = document.createElement('div');
+    ov.className = 'kicanvas-overlay';
+    ov.innerHTML = `<div class="kicanvas-bar"><div><b>KiCanvas</b> <small>${esc(fileName)}</small><div class="kicanvas-status" role="status">KiCanvas を読み込み中…（ネット接続が要ります）</div></div><button class="btn" data-close>閉じる</button></div>`;
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('title', 'KiCanvas');
+    frame.srcdoc = kicanvasPage(files[0].content, fileName);
+    ov.appendChild(frame);
+    document.body.appendChild(ov);
+    const status = ov.querySelector('.kicanvas-status');
+    const close = () => { window.removeEventListener('message', onMsg); ov.remove(); };
+    ov.querySelector('[data-close]').onclick = close;
+    const result = { stage: 'loading' };
+    function onMsg(e) {
+      if (e.source !== frame.contentWindow || e.data?.type !== 'pocketeda-kicanvas') return;
+      const m = e.data;
+      if (m.stage === 'loaded') {
+        const c = compareCounts(m, pcb);
+        Object.assign(result, m, { compare: c });
+        status.className = `kicanvas-status ${c.ok ? 'ok' : 'ng'}`;
+        status.textContent = c.ok
+          ? `読み込めました（KiCad 形式 ${m.version}）。部品 ${m.footprints}・パッド ${m.pads}・配線 ${m.segments}・ビア ${m.vias}・ベタ ${m.zones} が書き出しと一致`
+          : `読み込めましたが数が違います: ${c.rows.filter((r) => !r.ok).map((r) => `${r.label} ${r.got}（書き出し ${r.want}）`).join('、')}`;
+        ctx.log?.('check', `KiCanvas: ${status.textContent}`);
+      } else if (m.stage === 'error') {
+        if (result.stage === 'loaded') return; // 表示後の細かなエラーは状態を変えない
+        result.errors = [...(result.errors || []), m.message];
+        status.className = 'kicanvas-status ng';
+        status.textContent = `KiCanvas でエラー: ${m.message}`;
+        ctx.log?.('error', `KiCanvas: ${m.message}`);
+      } else if (m.stage === 'neterror') {
+        Object.assign(result, { stage: 'neterror' });
+        status.className = 'kicanvas-status ng';
+        status.textContent = 'KiCanvas を読み込めませんでした（ネット接続を確認してください）';
+      } else if (m.stage === 'timeout' && result.stage !== 'loaded') {
+        Object.assign(result, { stage: 'timeout' });
+        status.className = 'kicanvas-status ng';
+        status.textContent = '時間内に表示されませんでした（ネット接続、または KiCanvas が読めない内容の可能性）';
+      }
+      if (m.stage === 'loaded') result.stage = 'loaded';
+    }
+    window.addEventListener('message', onMsg);
+    return result;
   }
 
   function bindCommon() {
@@ -314,5 +372,5 @@ export function createOutputView(ctx) {
     return { files, zip };
   }
 
-  return { render, exportZip, exportAssembly, exportKicad, getPlot, setTab(t) { st.tab = t; render(); } };
+  return { render, exportZip, exportAssembly, exportKicad, openKicanvas, getPlot, setTab(t) { st.tab = t; render(); } };
 }

@@ -191,7 +191,7 @@ await step('ログ: DRC の結果と操作が記録され、画面で見られ�
   await page.locator('#btn-menu').click();
   await page.locator('#menu [data-act="log"]').click();
   const t = await page.locator('#dialog .log-view').textContent();
-  assert.match(t, /起動 0\.12\.5/);
+  assert.match(t, /起動 0\.12\.6/);
   assert.match(t, /DRC: エラー/);
   assert.match(t, /エラーの種類: /);
   await page.screenshot({ path: `${OUT}/check-log.png` });

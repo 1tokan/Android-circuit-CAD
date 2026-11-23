@@ -228,11 +228,21 @@ await step('同梱サンプル「USB DAC アンプ」を画面から開き、ERC
   await shot('02c-sample-3d');
   await evaluate('window.pocketEDA.back()');
   await sleep(500);
+  // 書き出した .kicad_pcb を、本物の KiCanvas（kicanvas.org から読み込む KiCad ビューア）で読み直す
+  await evaluate("window.pocketEDA.state.outputView.setTab('kicad'); window.__kc = window.pocketEDA.state.outputView.openKicanvas(); true");
+  let kc = null;
+  for (let i = 0; i < 150; i++) { kc = await evaluate('JSON.parse(JSON.stringify(window.__kc))'); if (kc && kc.stage !== 'loading') break; await sleep(400); }
+  await sleep(1500);
+  await shot('02d-sample-kicanvas');
+  const kcStatus = await evaluate("document.querySelector('.kicanvas-overlay .kicanvas-status')?.textContent || ''");
+  await evaluate("document.querySelector('.kicanvas-overlay [data-close]')?.click(); true");
+  if (kc.stage === 'neterror') console.log('  KiCanvas: エミュレータからネットに出られないため確認できず');
+  else if (kc.stage !== 'loaded' || !kc.compare?.ok) throw new Error('KiCanvas で読み直せない: ' + kcStatus + ' ' + JSON.stringify({ stage: kc.stage, errors: kc.errors, rows: kc.compare?.rows }));
   // 以降の操作の試験は、これまでと同じテストD の基板で行う（サンプルはベタの塗り直しが重く、エミュレータでは数秒かかるため）
   if (testDId) await evaluate(`window.pocketEDA.store.loadProject(${JSON.stringify(testDId)}).then((p) => window.pocketEDA.openProject(p))`);
   await tapSelector('#ws-nav button[data-ws="pcb"]');
   await sleep(1500);
-  return { ...r, open3dMs, parts3d: gl.parts };
+  return { ...r, open3dMs, parts3d: gl.parts, kicanvas: kc.stage === 'loaded' ? `${kc.footprints} fp / ${kc.segments} seg / ${kc.vias} via / ${kc.zones} zone` : kc.stage };
 });
 
 await step('Android の戻るボタン: ドロワーを閉じる → 回路図へ戻る', async () => {
