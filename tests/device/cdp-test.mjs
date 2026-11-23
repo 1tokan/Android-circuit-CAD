@@ -58,6 +58,7 @@ async function tapSelector(sel) {
   await sleep(400);
 }
 const topActivity = () => adb('shell', 'dumpsys', 'activity', 'activities').split('\n').find((l) => /topResumedActivity|mResumedActivity/.test(l)) || '';
+const wakefulness = () => (adb('shell', 'dumpsys', 'power').split('\n').find((l) => /mWakefulness=/.test(l)) || '').trim();
 const appOnTop = () => topActivity().includes('jp.tokan.pocketeda');
 const back = async () => { adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); await sleep(800); };
 // エミュレータが重いとキー入力が届くのが遅れる・取りこぼすことがある。
@@ -215,7 +216,7 @@ await step('Android の戻るボタン: ドロワーを閉じる → 回路図�
   if (await evaluate("document.querySelector('#drawer').hidden")) throw new Error('ドロワーが開かない');
   await shot('03-drawer');
   const r1 = await backUntil("document.querySelector('#drawer').hidden");
-  if (r1 < 0) throw new Error('戻るでドロワーが閉じない');
+  if (r1 < 0) throw new Error('戻るでドロワーが閉じない（' + wakefulness() + '）');
   if ((await evaluate('window.pocketEDA.state.workspace')) !== 'pcb') throw new Error('ドロワーを閉じただけで画面が変わった');
   const r2 = await backUntil("window.pocketEDA.state.workspace === 'schematic'");
   if (r2 < 0) throw new Error('戻るで回路図に戻らない: ' + (await evaluate('window.pocketEDA.state.workspace')));
@@ -238,7 +239,7 @@ await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面�
   if (!zip || zip.size < 1000) throw new Error('ZIP が書かれていない: ' + JSON.stringify(files));
   // 共有シートを閉じて、アプリが前面に戻るのを確かめる
   for (let i = 0; i < 3 && !appOnTop(); i++) { await back(); await sleep(700); }
-  if (!appOnTop()) throw new Error('共有シートが閉じない: ' + topActivity().trim());
+  if (!appOnTop()) throw new Error('共有シートが閉じない: ' + topActivity().trim() + '（' + wakefulness() + '）');
   return zip;
 });
 

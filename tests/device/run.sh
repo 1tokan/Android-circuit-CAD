@@ -10,6 +10,11 @@ mkdir -p "$OUT"
 adb wait-for-device
 adb shell getprop ro.build.version.release > "$OUT/android-version.txt"
 adb shell dumpsys package com.google.android.webview | grep -m1 versionName > "$OUT/webview-version.txt" || true
+# 試験の途中で画面が消えるとキー入力（戻るボタン）が届かなくなるので、点けたままにする
+adb shell svc power stayon true || true
+adb shell settings put system screen_off_timeout 1800000 || true
+adb shell input keyevent KEYCODE_WAKEUP || true
+adb shell wm dismiss-keyguard || true
 adb uninstall "$PKG" >/dev/null 2>&1 || true
 adb install -r "$APK" || exit 1
 adb logcat -c
