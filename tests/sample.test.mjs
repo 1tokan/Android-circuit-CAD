@@ -128,3 +128,11 @@ test('部品番号の自動配置: パッドに重ねた番号を動かし、シ
   assert.equal(refdesConflicts(b), 0);
   assert.equal(M.drc.runDrc(q, b).issues.filter((i) => i.rule === 'silk_pad').length, 0);
 });
+
+test('サンプル: 実装データにエラーなし・警告は区分未確認の 1 件だけ（注文の種類は標準 PCBA・両面、捨て基板は JLCPCB が付ける）', () => {
+  const asm = M.asm.buildAssembly(prj, pcb, { boards: 5 });
+  // 10µF（C77044）の Basic/Extended の区分は未確認なので、その警告だけは残る
+  const bad = asm.problems.filter((p) => p.level !== 'info' && !/区分が不明な部品: C2, C4, C6, C12, C17, C19, C33, C35（/.test(p.message));
+  assert.deepEqual(bad.map((p) => p.message), []);
+  assert.equal(asm.summary.service.type, 'standard'); assert.equal(asm.summary.service.sides, 'double'); assert.ok(asm.summary.service.rails);
+});

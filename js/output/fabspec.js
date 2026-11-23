@@ -87,7 +87,7 @@ export function stackupText(layers, fab) {
 }
 
 /** 注文フォームに写すための一覧（日本語の説明＋JLCPCB の項目名） */
-export function orderSheet({ layers, fab, board, files, holes, minTrack, minDrill, smdParts }) {
+export function orderSheet({ layers, fab, board, files, holes, minTrack, minDrill, smdParts, pcba = null }) {
   const L = LABELS;
   const rows = [
     ['Base Material', 'FR-4', '基材'],
@@ -103,6 +103,11 @@ export function orderSheet({ layers, fab, board, files, holes, minTrack, minDril
     ['Min via hole / trace', `${minDrill ? minDrill.toFixed(2) : '-'} mm / ${minTrack ? minTrack.toFixed(3) : '-'} mm`, '最小穴径・最小配線幅（確認用）'],
     ['Holes', String(holes), '穴の数（確認用）'],
     ['Assembly (SMD parts)', String(smdParts), '実装部品数（PCBA を頼む場合）'],
+    ...(pcba && smdParts ? [
+      ['PCBA Type', pcba.type === 'economic' ? 'Economic' : 'Standard', pcba.type === 'economic' ? 'PCBA の種類（エコノミー）' : `PCBA の種類（標準。${pcba.why.join('、')}）`],
+      ['Assembly Side', pcba.sides === 'double' ? 'Both Sides' : pcba.bottomOnly ? 'Bottom Side' : 'Top Side', '実装面'],
+      ...(pcba.rails ? [['Edge Rails/Fiducials', 'Added by JLCPCB', `捨て基板（${pcba.w.toFixed(0)}×${pcba.h.toFixed(0)}mm は 70×70mm 未満のため。JLCPCB が付ける）`]] : []),
+    ] : []),
   ];
   const text = [
     `Pocket EDA 製造仕様（JLCPCB 注文フォーム用）`,

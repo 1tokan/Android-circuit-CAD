@@ -51,7 +51,8 @@ test('CPL: 回転（反時計回りが正）・パッケージ補正・裏面・
   assert.equal(row(a, 'R3').layer, 'Bottom');
   assert.equal(row(a, 'R4').rotation, 270, '裏面: θ=-90 → 180-(-90) = 270');
   assert.equal(row(a, 'U3').rotation, 0, '270 + 手動 90');
-  assert.ok(a.problems.some((p) => /裏面/.test(p.message)));
+  assert.ok(a.problems.some((p) => p.level === 'info' && /標準 PCBA・両面/.test(p.message)), '両面なら標準 PCBA');
+  assert.equal(a.summary.service.type, 'standard');
 });
 
 test('補正表: 自動生成フットプリントはパッケージ名で照合', () => {
@@ -91,4 +92,18 @@ test('BOM: 部品代の目安（価格のある部品のみ）', () => {
   assert.equal(a.bom[0].jlcType, 'basic');
   assert.equal(a.bom[0].unitUsd, 0.01, '2個×10枚=20個 → 1個以上の単価');
   assert.equal(a.summary.partsUsd, 0.2);
+});
+
+test('PCBA の種類: 片面ならエコノミー、両面なら標準（70×70mm 未満は捨て基板）。テストパッドはお知らせだけ', () => {
+  const tp = { id: 'TestPoint_Pad_1.0x1.0mm', name: 'TestPoint_Pad_1.0x1.0mm', pads: [{ num: '1', type: 'smd', shape: 'rect', x: 0, y: 0, w: 1, h: 1, layers: ['F.Cu', 'F.Mask'] }], silk: [], courtyard: null };
+  const one = board([['R1', 'R_0805', 10, 5], ['TP1', tp, 20, 5, 0, { dnp: true, lcsc: '' }]]);
+  const a = buildAssembly(one.prj, one.pcb);
+  assert.equal(a.summary.service.type, 'economic');
+  assert.ok(!a.problems.some((p) => p.level !== 'info' && p.refs?.includes('TP1')), 'テストパッドは警告にしない');
+  assert.ok(a.problems.some((p) => p.level === 'info' && /テストパッド/.test(p.message) && p.refs.includes('TP1')));
+  const two = board([['R1', 'R_0805', 10, 5], ['R2', 'R_0805', 10, 15, 0, { side: 'bottom' }]]);
+  const b = buildAssembly(two.prj, two.pcb);
+  assert.equal(b.summary.service.type, 'standard'); assert.equal(b.summary.service.sides, 'double');
+  assert.ok(b.summary.service.rails, '50×40mm は 70×70mm より小さい');
+  assert.equal(b.summary.service.setupUsd, 51.12);
 });

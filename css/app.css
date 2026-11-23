@@ -400,6 +400,8 @@ button { font: inherit; color: inherit; }
 .issue .lv { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
 .issue.error .lv { background: #c83a3a; color: #fff; }
 .issue.warning .lv { background: #c9a227; color: #000; }
+.issue.info .lv { background: #3b7ea1; color: #fff; }
+.asm-service { margin: 6px 0 2px; font-size: 14px; }
 .issue .msg { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .check-wrap details { margin-top: 12px; }
 .check-wrap summary { cursor: pointer; font-weight: 600; padding: 6px 0; }

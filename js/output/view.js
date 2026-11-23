@@ -5,7 +5,7 @@ import { layerName } from '../pcb/model.js';
 import { gerberFiles } from './gerber.js';
 import { makeZip } from './zip.js';
 import { drcStatus } from '../check/drc.js';
-import { buildAssembly, bomCsv, cplCsv } from './assembly.js';
+import { buildAssembly, bomCsv, cplCsv, pcbaService } from './assembly.js';
 import { lcscUrl } from '../library/parts.js';
 import { esc } from '../core/util.js';
 
@@ -110,7 +110,7 @@ export function createOutputView(ctx) {
     const nL = pcb.settings?.layers || 2;
     const fab = p.board.fab;
     const fabIssues = checkFab(fab, nL);
-    const sheet = orderSheet({ layers: nL, fab, board: plot.board, files: plot.layerDefs.map((l) => '.' + l.ext.toUpperCase()), holes, minTrack: minTrack < Infinity ? minTrack : 0, minDrill: minDrill < Infinity ? minDrill : 0, smdParts: pcb.footprints.filter((f) => !f.dnp).length });
+    const sheet = orderSheet({ layers: nL, fab, board: plot.board, files: plot.layerDefs.map((l) => '.' + l.ext.toUpperCase()), holes, minTrack: minTrack < Infinity ? minTrack : 0, minDrill: minDrill < Infinity ? minDrill : 0, smdParts: pcb.footprints.filter((f) => !f.dnp).length, pcba: pcbaService(p, pcb, pcb.footprints.filter((f) => !f.dnp).map((f) => ({ layer: f.side === 'bottom' ? 'Bottom' : 'Top' }))) });
     const chips = ORDER.filter((id) => id === 'drill' || plot.layers[id]).map((id) => `<button class="chip${st.show.has(id) ? ' on' : ''}" data-layer="${id}"><i style="background:${PREVIEW[id].color}"></i>${PREVIEW[id].label}</button>`).join('');
     const files = st.last ? `<details open><summary>前回書き出したファイル（${st.last.files.length}）</summary><ul class="files">${st.last.files.map((f) => `<li><span>${esc(f.name)}</span><small>${(f.content.length / 1024).toFixed(1)} KB</small></li>`).join('')}</ul><p class="note">${esc(ctx.fmtTime(st.last.at))}・ZIP ${(st.last.size / 1024).toFixed(1)} KB</p></details>` : '';
     const tabs = `<div class="chips seg">${[['gerber', '基板（Gerber）'], ['asm', '部品実装（BOM・CPL）']].map(([k, l]) => `<button class="chip${st.tab === k ? ' on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
@@ -201,18 +201,19 @@ export function createOutputView(ctx) {
 
   function assemblyHtml() {
     const a = assembly();
-    const errs = a.problems.filter((x) => x.level === 'error'), warns = a.problems.filter((x) => x.level === 'warning');
-    const list = (arr, cls) => (arr.length ? `<ul class="issues">${arr.map((x) => `<li class="issue ${x.level}"><span class="lv">${x.level === 'error' ? '✕' : '!'}</span><span class="msg">${esc(x.message)}</span></li>`).join('')}</ul>` : '');
+    const errs = a.problems.filter((x) => x.level === 'error'), warns = a.problems.filter((x) => x.level === 'warning'), infos = a.problems.filter((x) => x.level === 'info');
+    const list = (arr, cls) => (arr.length ? `<ul class="issues">${arr.map((x) => `<li class="issue ${x.level}"><span class="lv">${x.level === 'error' ? '✕' : x.level === 'info' ? 'i' : '!'}</span><span class="msg">${esc(x.message)}</span></li>`).join('')}</ul>` : '');
     const type = { basic: 'Basic', preferred: 'Preferred', extended: 'Extended', unknown: '—' };
     const bomRows = a.bom.map((r) => `<tr><td>${esc(r.comment)}</td><td>${esc(r.designators.join(', '))}</td><td>${esc(r.footprint)}</td><td>${r.lcsc ? `<a href="${esc(lcscUrl(r.lcsc))}" target="_blank" rel="noopener">${esc(r.lcsc)}</a>` : '<b class="err">なし</b>'}</td><td>${type[r.jlcType] || '—'}</td><td class="num">${r.qty}</td><td class="num">${r.unitUsd != null ? '$' + r.unitUsd.toFixed(4) : '—'}</td></tr>`).join('');
     const cplRows = a.cpl.map((c) => `<tr><td>${esc(c.designator)}</td><td class="num">${c.x.toFixed(3)}</td><td class="num">${c.y.toFixed(3)}</td><td>${c.layer === 'Top' ? '表' : '裏'}</td><td class="num"><b>${+c.rotation.toFixed(2)}°</b><br><small>${+c.base.toFixed(2)}${c.pkgOffset ? ` + ${c.pkgOffset}` : ''}${c.manualOffset ? ` + ${c.manualOffset}` : ''}</small></td><td><button class="btn small-btn" data-rot="${esc(c.designator)}" data-d="-90">−90</button><button class="btn small-btn" data-rot="${esc(c.designator)}" data-d="90">+90</button></td></tr>`).join('');
     return `<div class="check-card on">
         <div class="check-card-head"><b>部品実装（JLCPCB PCBA 向け）</b>${errs.length ? `<span class="err">要修正 ${errs.length}</span>` : '<span class="ok">書き出せます</span>'}</div>
+        <div class="asm-service" data-service="${a.summary.service.type}">注文の種類: <b>${a.summary.service.type === 'economic' ? 'エコノミー PCBA' : `標準 PCBA（${a.summary.service.sides === 'double' ? '両面' : '片面'}）`}</b></div>
         <small>実装する部品 ${a.summary.parts} 個・${a.summary.lines} 種類${a.summary.partsUsd != null ? `・部品代の目安 $${a.summary.partsUsd.toFixed(2)}（${a.summary.boards} 枚分・価格のある ${a.summary.pricedLines} 種類のみ。送料・実装費は別）` : ''}</small>
         <label class="opt">枚数 <input type="number" id="asm-boards" min="1" max="10000" value="${st.boards}" inputmode="numeric" style="width:90px"></label>
         <div class="check-card-actions"><button class="btn primary" data-bom>BOMを書き出す</button><button class="btn primary" data-cpl>CPLを書き出す</button></div>
       </div>
-      ${list(errs)}${list(warns)}
+      ${list(errs)}${list(warns)}${list(infos)}
       <h3>BOM（${a.bom.length} 行）</h3>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Comment</th><th>Designator</th><th>Footprint</th><th>LCSC</th><th>区分</th><th>数</th><th>単価</th></tr></thead><tbody>${bomRows || '<tr><td colspan="7">部品がありません</td></tr>'}</tbody></table></div>
       <h3>CPL（${a.cpl.length} 行）</h3>
