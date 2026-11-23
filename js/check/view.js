@@ -4,6 +4,7 @@
 import { runErc, ercStatus } from './erc.js';
 import { runDrc, drcStatus } from './drc.js';
 import { runSignals, signalStatus } from './signal.js';
+import { log as alog, projectSummary } from '../core/applog.js';
 import { drcRules, baseRules, layerCount } from './rules.js';
 import { esc } from '../core/util.js';
 import { currentSettings, requiredWidthMm, viaCapacityA, layerOz, DEFAULT_TEMP_RISE } from './current.js';
@@ -35,6 +36,14 @@ export function createCheckView(ctx) {
     const p = ctx.getProject();
     const r = kind === 'erc' ? runErc(p) : kind === 'sig' ? runSignals(p, ctx.getPcb()) : runDrc(p, ctx.getPcb());
     ctx.mutate((q) => { q.checks = { ...(q.checks || {}), [kind]: r }; }, `check:${kind}`);
+    {
+      // 検査の結果をログへ（エラーは規則ごとの件数と、最初の数件の内容・位置）
+      const errs = r.issues.filter((i) => i.level === 'error');
+      const byRule = {};
+      for (const i of errs) byRule[i.rule] = (byRule[i.rule] || 0) + 1;
+      alog('check', `${{ erc: 'ERC', drc: 'DRC', sig: '信号経路' }[kind]}: エラー ${r.summary.errors}・警告 ${r.summary.warnings}`,
+        { ...projectSummary(p), errors: byRule, first: errs.slice(0, 8).map((i) => `${i.message}${i.at ? ` @(${(+i.at.x).toFixed(2)},${(+i.at.y).toFixed(2)})` : ''}`) });
+    }
     st.tab = kind;
     render();
     if (!quiet) ctx.toast(`${kind === 'sig' ? '信号経路' : kind.toUpperCase()}: エラー ${r.summary.errors}・警告 ${r.summary.warnings}`);

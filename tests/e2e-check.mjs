@@ -187,6 +187,17 @@ await step('結果は保存され、再読込後も残る', async () => {
   assert.ok(await page.locator('#check-view .issue').count() >= 1);
 });
 
+await step('ログ: DRC の結果と操作が記録され、画面で見られる', async () => {
+  await page.locator('#btn-menu').click();
+  await page.locator('#menu [data-act="log"]').click();
+  const t = await page.locator('#dialog .log-view').textContent();
+  assert.match(t, /起動 0\.12\.4/);
+  assert.match(t, /DRC: エラー/);
+  assert.match(t, /エラーの種類: /);
+  await page.screenshot({ path: `${OUT}/check-log.png` });
+  await page.locator('#dialog button', { hasText: '閉じる' }).click();
+});
+
 await step('コンソールエラーなし', async () => { assert.deepEqual(errors, []); });
 await browser.close();
 const ng = results.filter((r) => r[0] === 'NG');

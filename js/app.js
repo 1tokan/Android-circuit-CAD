@@ -25,9 +25,10 @@ import { createAiView } from './ai/view.js';
 import { applySpec, projectFromSpec } from './ai/spec.js';
 import { moduleById } from './modules/registry.js';
 import { esc } from './core/util.js';
+import { log as alog, logError, projectSummary, installErrorHooks, getLog, clearLog, formatLog, flushLog } from './core/applog.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.12.3';
+const APP_VERSION = '0.12.4';
 
 const state = {
   project: null,
@@ -104,6 +105,7 @@ async function recoverPending() {
 /** プロジェクトを変更する唯一の入口。全モジュールはこれを使う */
 export function mutateProject(fn, reason = 'edit') {
   fn(state.project);
+  if (!['undo', 'redo'].includes(reason) && !String(reason).startsWith('check:')) alog('op', String(reason), projectSummary(state.project));
   touch(state.project);
   state.saver.markDirty();
   bus.emit('project:changed', { reason, revision: state.project.revision });
@@ -141,6 +143,7 @@ function undoRedo(kind) {
   const l = kind === 'undo' ? h.undo() : h.redo();
   if (l === null) return;
   mutateProject(() => {}, kind);
+  alog('undo', `${kind === 'undo' ? '元に戻す' : 'やり直す'}: ${l}（${state.workspace}）`, projectSummary(state.project));
   if (ed) { ed.state.sel = new Set(); ed.render(); }
   renderSidePanel();
   toast(`${kind === 'undo' ? '元に戻す' : 'やり直す'}: ${l}`);
@@ -156,6 +159,7 @@ function renderUndo() {
 async function openProject(project) {
   if (state.project && state.saver.dirty) await state.saver.flush();
   state.project = project;
+  alog('open', `プロジェクトを開く「${project.name}」`, projectSummary(project));
   ensurePcb(project);
   state.history.clear();
   state.pcbHistory.clear();
@@ -197,7 +201,7 @@ function renderNav() {
     const stLabel = st === 'planned' ? '未実装' : st === 'partial' ? '一部実装' : '';
     b.innerHTML = `<span>${ws.label}</span>${stLabel ? `<span class="badge ${st}">${stLabel}</span>` : ''}`;
     b.setAttribute('aria-label', stLabel ? `${ws.label}（${stLabel}）` : ws.label);
-    b.onclick = () => { state.workspace = ws.id; state.marker = null; renderAll(); };
+    b.onclick = () => { state.workspace = ws.id; state.marker = null; alog('app', `画面: ${ws.id}`); renderAll(); };
     return b;
   }));
 }
@@ -271,7 +275,7 @@ function usePartInProject(part) {
     p.library.parts.push(structuredClone(part));
   }, 'library');
 }
-function switchWorkspace(id) { state.workspace = id; renderAll(); }
+function switchWorkspace(id) { state.workspace = id; alog('app', `画面: ${id}`); renderAll(); }
 
 function toBase64(bytes) {
   let s = '';
@@ -310,6 +314,7 @@ const NATIVE = !!globalThis.Capacitor?.isNativePlatform?.();
  */
 async function download(name, text, type = 'text/plain') {
   const binary = text instanceof Uint8Array;
+  alog('io', `書き出し ${name}（${binary ? text.length : text.length} ${binary ? 'バイト' : '文字'}）`);
   if (NATIVE) {
     const { Filesystem, Share } = globalThis.Capacitor.Plugins;
     try {
@@ -318,7 +323,7 @@ async function download(name, text, type = 'text/plain') {
         : await Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
       await Share.share({ title: name, files: [r.uri], dialogTitle: `${name} を保存・共有` });
     } catch (e) {
-      if (!/cancel/i.test(String(e?.message))) toast('書き出せませんでした: ' + (e?.message || e), true);
+      if (!/cancel/i.test(String(e?.message))) { logError(e, `書き出し ${name}`); toast('書き出せませんでした: ' + (e?.message || e), true); }
     }
     return;
   }
@@ -603,7 +608,10 @@ function exportProject() {
 async function importFile(file) {
   let p;
   try {
-    p = parseProject(await file.text());
+    let text = await file.text();
+    // 不具合の報告ファイル（ログ＋プロジェクト）も読める
+    try { const j = JSON.parse(text); if (j?.format === 'pocketeda-report' && j.project) text = JSON.stringify(j.project); } catch { /* ふつうの JSON として読む */ }
+    p = parseProject(text);
   } catch (e) {
     toast(e instanceof ProjectFormatError ? e.message : '読み込めませんでした: ' + e.message, true);
     return;
@@ -671,6 +679,35 @@ async function showBackups() {
 }
 
 // ---------------- 汎用UI ----------------
+/** ログを見る・書き出す（不具合の報告用。送信はしない） */
+async function showLog() {
+  const header = () => ({
+    'Pocket EDA': `${APP_VERSION}（${NATIVE ? 'Android アプリ' : 'ブラウザ'}）`,
+    '端末': navigator.userAgent,
+    '書き出した日時': new Date().toLocaleString('ja-JP'),
+    'プロジェクト': state.project ? `${state.project.name}（${JSON.stringify(projectSummary(state.project))}）` : '-',
+  });
+  for (;;) {
+    const entries = getLog();
+    const errors = entries.filter((e) => e.k === 'error').length;
+    const shown = entries.slice(-200);
+    setTimeout(() => { const v = document.getElementById('log-view'); if (v) v.scrollTop = v.scrollHeight; }, 0);
+    const r = await ask(`ログ（${entries.length} 件・エラー ${errors} 件）`,
+      `<p class="note">操作・検査の結果・エラーをこの端末にだけ記録しています（新しいものが下、最大 600 件）。不具合を報告するときは「プロジェクトと一緒に書き出す」で、操作の記録と今の設計を 1 つのファイルにできます。</p>
+       <pre class="log-view" id="log-view">${esc(formatLog(shown))}</pre>`,
+      [{ label: '閉じる', value: '' }, { label: '消去', value: 'clear', cls: 'danger' }, { label: 'ログを書き出す', value: 'txt' }, { label: 'プロジェクトと一緒に書き出す', value: 'report', cls: 'primary' }]);
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    if (r === 'clear') { clearLog(); alog('app', 'ログを消去'); continue; }
+    if (r === 'txt') { flushLog(); await download(`pocketeda-log-${stamp}.txt`, formatLog(getLog(), header())); }
+    if (r === 'report') {
+      flushLog();
+      const rep = { format: 'pocketeda-report', version: 1, app: APP_VERSION, native: NATIVE, ua: navigator.userAgent, createdAt: new Date().toISOString(), logText: formatLog(getLog(), header()), log: getLog(), project: JSON.parse(serializeProject(state.project)) };
+      await download(`${safeFileName(state.project.name)}-report-${stamp}.json`, JSON.stringify(rep), 'application/json');
+    }
+    return;
+  }
+}
+
 function ask(title, html, buttons, listMode = false) {
   const dlg = $('#dialog');
   $('#dialog-title').textContent = title;
@@ -708,6 +745,7 @@ async function promptTextWithValue(title, value) {
 
 let toastTimer;
 function toast(msg, isError = false) {
+  if (isError) alog('error', `表示したエラー: ${msg}`);
   const t = $('#toast');
   t.textContent = msg;
   t.className = 'toast' + (isError ? ' error' : '');
@@ -770,6 +808,7 @@ function bindUI() {
     if (act === 'ai') openAi();
     if (act === 'annotate') { state.editor.reannotate(); toast('部品番号を位置順に振り直しました'); }
     if (act === 'netlist') showNetlist();
+    if (act === 'log') showLog();
     if (act === 'about') {
       ask('Pocket EDA', `<p>${NATIVE ? 'Androidアプリ版 ' : ''}バージョン ${APP_VERSION}</p><p>データはこの端末のブラウザ内（IndexedDB）に保存されます。端末変更やブラウザのデータ削除に備えて、JSON書き出しでバックアップしてください。</p>`,
         [{ label: '閉じる', value: '' }]);
@@ -818,6 +857,8 @@ function bindUI() {
 
 // ---------------- 起動 ----------------
 async function boot() {
+  installErrorHooks(window);
+  alog('app', `起動 ${APP_VERSION}（${NATIVE ? 'Android アプリ' : 'ブラウザ'}）`, { ua: navigator.userAgent.slice(0, 160), screen: `${screen.width}x${screen.height}@${devicePixelRatio}` });
   state.saver = new AutoSaver(saveNow, { onState: setSaveState });
   // 退避は保存(flush)より先に同期で行う
   window.addEventListener('pagehide', writePending);
