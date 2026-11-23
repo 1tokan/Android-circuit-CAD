@@ -60,10 +60,21 @@ async function tapSelector(sel) {
 const back = async () => { adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); await sleep(800); };
 // エミュレータが重いとキー入力が届くのが遅れる・取りこぼすことがある。
 // 期待した変化を最大4秒待ち、変化が無いときだけもう1回押す（変化した後に重ねて押すことはない）
+// 保存が終わり、描画などの重い処理が落ち着くまで待つ（エミュレータでは大きな基板の後に数秒かかり、その間のキー入力は遅れて届く）
+const waitIdle = async (ms = 15000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const idle = await evaluate(`new Promise((r) => { const s = window.pocketEDA.state.saver; if (s && (s.dirty || s.saving)) return r(false); (window.requestIdleCallback || setTimeout)(() => r(true), { timeout: 2000 }); })`);
+    if (idle) return Date.now() - t0;
+    await sleep(300);
+  }
+  return -1;
+};
 const backUntil = async (cond) => {
+  await waitIdle();
   for (let attempt = 0; attempt < 2; attempt++) {
     adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
-    for (let i = 0; i < 20; i++) { await sleep(200); if (await evaluate(cond)) return attempt; }
+    for (let i = 0; i < 40; i++) { await sleep(250); if (await evaluate(cond)) return attempt; }
   }
   return -1;
 };
@@ -196,7 +207,9 @@ await step('同梱サンプル「USB DAC アンプ」を画面から開き、ERC
 });
 
 await step('Android の戻るボタン: ドロワーを閉じる → 回路図へ戻る', async () => {
+  const idleMs = await waitIdle();
   await tapSelector('#btn-projects');
+  for (let i = 0; i < 20 && (await evaluate("document.querySelector('#drawer').hidden")); i++) await sleep(250);
   if (await evaluate("document.querySelector('#drawer').hidden")) throw new Error('ドロワーが開かない');
   await shot('03-drawer');
   const r1 = await backUntil("document.querySelector('#drawer').hidden");
@@ -204,7 +217,7 @@ await step('Android の戻るボタン: ドロワーを閉じる → 回路図�
   if ((await evaluate('window.pocketEDA.state.workspace')) !== 'pcb') throw new Error('ドロワーを閉じただけで画面が変わった');
   const r2 = await backUntil("window.pocketEDA.state.workspace === 'schematic'");
   if (r2 < 0) throw new Error('戻るで回路図に戻らない: ' + (await evaluate('window.pocketEDA.state.workspace')));
-  return { retried: r1 + r2 };
+  return { retried: r1 + r2, idleMs };
 });
 
 await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面を開く）', async () => {
