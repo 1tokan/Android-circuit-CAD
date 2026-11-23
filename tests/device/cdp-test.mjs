@@ -73,7 +73,22 @@ const waitIdle = async (ms = 15000) => {
   }
   return -1;
 };
+// 遅いエミュレータでは、起動直後にランチャー（ホーム画面）が「応答なし（ANR）」になり、そのダイアログが前面で
+// 戻るボタンを受け取ってしまう（アプリにも共有シートにも届かない）。試験の前に見つけたら閉じる
+const anrClosed = [];
+const clearSystemDialogs = () => {
+  for (let k = 0; k < 3; k++) {
+    const focus = (adb('shell', 'dumpsys', 'window', 'windows').split('\n').find((l) => /mCurrentFocus=/.test(l)) || '').trim();
+    const m = /Application Not Responding: ([\w.]+)/.exec(focus);
+    if (!m) return;
+    anrClosed.push(m[1]);
+    adb('shell', 'am', 'force-stop', m[1]);
+    adb('shell', 'am', 'broadcast', '-a', 'android.intent.action.CLOSE_SYSTEM_DIALOGS');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
+  }
+};
 const backUntil = async (cond) => {
+  clearSystemDialogs();
   await waitIdle();
   for (let attempt = 0; attempt < 2; attempt++) {
     adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
@@ -220,7 +235,7 @@ await step('Android の戻るボタン: ドロワーを閉じる → 回路図�
   if ((await evaluate('window.pocketEDA.state.workspace')) !== 'pcb') throw new Error('ドロワーを閉じただけで画面が変わった');
   const r2 = await backUntil("window.pocketEDA.state.workspace === 'schematic'");
   if (r2 < 0) throw new Error('戻るで回路図に戻らない: ' + (await evaluate('window.pocketEDA.state.workspace')));
-  return { retried: r1 + r2, idleMs };
+  return { retried: r1 + r2, idleMs, anrClosed };
 });
 
 await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面を開く）', async () => {
@@ -238,6 +253,7 @@ await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面�
   const zip = files.find((f) => /-gerber\.zip$/.test(f.name));
   if (!zip || zip.size < 1000) throw new Error('ZIP が書かれていない: ' + JSON.stringify(files));
   // 共有シートを閉じて、アプリが前面に戻るのを確かめる
+  clearSystemDialogs();
   for (let i = 0; i < 3 && !appOnTop(); i++) { await back(); await sleep(700); }
   if (!appOnTop()) throw new Error('共有シートが閉じない: ' + topActivity().trim() + '（' + wakefulness() + '）');
   return zip;
@@ -245,6 +261,7 @@ await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面�
 
 await step('戻るボタン: 回路図でさらに戻るとアプリが背面へ（終了ではなく保存して最小化）', async () => {
   await evaluate("window.pocketEDA.state.workspace === 'schematic' || (document.querySelector('#ws-nav button[data-ws=\"schematic\"]').click(), true)");
+  clearSystemDialogs();
   if (!appOnTop()) throw new Error('試験の前にアプリが前面にない: ' + topActivity().trim());
   await waitIdle();
   adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
