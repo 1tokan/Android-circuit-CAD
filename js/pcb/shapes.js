@@ -1,6 +1,7 @@
 // PCB 要素 → 2D 形状（DRC・シルク生成で使う。単位 mm、基板座標）
 import { toMm, fpToBoard, padLayers, fpBox } from './model.js';
-import { textStrokes, strokeWidthFor } from './text.js';
+import { textStrokes, strokeWidthFor, textWidth } from './text.js';
+import { boardRect } from './model.js';
 
 /** 角丸パッドの角の半径 = 短辺 × この値（画面・Gerber・3D で共通） */
 export const ROUNDRECT_RATIO = 0.25;
@@ -78,9 +79,75 @@ export { padLayers };
 
 /** 部品番号（シルク文字）の位置。描画と DRC で同じ式を使う */
 export function refdesPos(inst) {
-  // 回転後の外形枠（外接矩形）の上に置く
+  // 位置を決めてあれば部品の原点からのずれ（mm、基板の向き）。無ければ外形枠（外接矩形）の上
+  if (inst.refOffset) return { x: toMm(inst.x) + inst.refOffset.dx, y: toMm(inst.y) + inst.refOffset.dy, size: 1.0 };
   const b = fpBox(inst);
   return { x: (b.x0 + b.x1) / 2, y: b.y0 - 0.3, size: 1.0 };
+}
+
+/** 部品番号の文字の外接矩形（基板座標 mm。y はベースラインから上へ size） */
+function refBox(inst, x, y) {
+  const w = textWidth(inst.ref, 1.0), sw = strokeWidthFor(1.0) / 2;
+  return { x0: x - w / 2 - sw, y0: y - 1.0 - sw, x1: x + w / 2 + sw, y1: y + sw };
+}
+const boxGap = (a, b) => Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1);
+
+/** パッドにかかる・基板からはみ出す部品番号のうち、placeRefdes で動かせる数（置き場所のない番号は数えない。チップを押しても直らないため） */
+export function refdesConflicts(pcb, { gap = 0.15 } = {}) {
+  return placeRefdes(pcb, { gap, dryRun: true }).moved.length;
+}
+
+/**
+ * 部品番号をパッド・ほかの部品番号に重ならず、基板の内側に収まる位置へ動かす。
+ * 候補: 外形枠の上 → 下 → 左 → 右（少しずつずらす）。どこにも置けない部品は元のまま（conflicts に入る）
+ * @returns { moved:[ref], conflicts:[ref] }
+ */
+export function placeRefdes(pcb, { gap = 0.15, dryRun = false, refs = null } = {}) {
+  const br = boardRect(pcb);
+  const padBoxes = { top: [], bottom: [] };
+  for (const f of pcb.footprints) for (const p of f.fpDef.pads) {
+    const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => fpToBoard(f, p.x + sx * p.w / 2, p.y + sy * p.h / 2));
+    const b = { x0: Math.min(...pts.map((q) => q.x)), y0: Math.min(...pts.map((q) => q.y)), x1: Math.max(...pts.map((q) => q.x)), y1: Math.max(...pts.map((q) => q.y)) };
+    if (p.type === 'tht') { padBoxes.top.push(b); padBoxes.bottom.push(b); } else padBoxes[f.side === 'bottom' ? 'bottom' : 'top'].push(b);
+  }
+  const texts = { top: [], bottom: [] };
+  const okAt = (side, b) => b.x0 >= br.x0 + 0.2 && b.x1 <= br.x1 - 0.2 && b.y0 >= br.y0 + 0.2 && b.y1 <= br.y1 - 0.2
+    && padBoxes[side].every((q) => boxGap(b, q) >= gap) && texts[side].every((q) => boxGap(b, q) >= 0.1);
+  const moved = [], conflicts = [];
+  const list = pcb.footprints.filter((f) => !f.hideRef);
+  // 既に問題のない番号は先に確定（その場所を他の番号が避ける）
+  const todo = [];
+  for (const f of list) {
+    const side = f.side === 'bottom' ? 'bottom' : 'top';
+    const rp = refdesPos(f), b = refBox(f, rp.x, rp.y);
+    if ((!refs || !refs.includes(f.ref)) && okAt(side, b)) texts[side].push(b);
+    else todo.push(f);
+  }
+  for (const f of todo) {
+    const side = f.side === 'bottom' ? 'bottom' : 'top';
+    const fb = fpBox(f), cx = (fb.x0 + fb.x1) / 2, cy = (fb.y0 + fb.y1) / 2, w = textWidth(f.ref, 1.0);
+    const cands = [];
+    for (const d of [0.3, 0.6, 1.0, 1.5]) {
+      for (const sx of [0, -1, 1, -2, 2]) {
+        cands.push([cx + sx * 0.5, fb.y0 - d]);           // 上
+        cands.push([cx + sx * 0.5, fb.y1 + 1.0 + d]);     // 下
+      }
+      for (const sy of [0, -1, 1]) {
+        cands.push([fb.x0 - d - w / 2, cy + 0.5 + sy * 0.5]); // 左
+        cands.push([fb.x1 + d + w / 2, cy + 0.5 + sy * 0.5]); // 右
+      }
+    }
+    let done = false;
+    for (const [x, y] of cands) {
+      const b = refBox(f, x, y);
+      if (!okAt(side, b)) continue;
+      texts[side].push(b);
+      if (!dryRun) f.refOffset = { dx: Math.round((x - toMm(f.x)) * 1000) / 1000, dy: Math.round((y - toMm(f.y)) * 1000) / 1000 };
+      moved.push(f.ref); done = true; break;
+    }
+    if (!done) conflicts.push(f.ref);
+  }
+  return { moved, conflicts };
 }
 
 /**

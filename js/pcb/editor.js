@@ -7,6 +7,8 @@ import {
 import { computePcbConnectivity, snapTarget } from './connectivity.js';
 import { drcRules } from '../check/rules.js';
 import { autoroute } from './autoroute.js';
+import { placeRefdes, refdesConflicts } from './shapes.js';
+import { netWidthFor, currentSettings } from '../check/current.js';
 import { renderPcb } from './render.js';
 import { esc } from '../core/util.js';
 
@@ -99,6 +101,8 @@ export function createPcbEditor(ctx) {
       const outside = pcb().footprints.filter((f) => { const b = fpBox(f); return b.x1 < br.x0 || b.x0 > br.x1 || b.y1 < br.y0 || b.y0 > br.y1; }).length;
       if (outside) c.push(chip('arrange', `基板内に並べる（${outside}）`, true));
       if (!outside && st.conn?.unrouted) c.push(chip('autoroute', `自動配線（${st.conn.unrouted}）`, true));
+      const refBad = outside ? 0 : refdesConflicts(pcb());
+      if (refBad) c.push(chip('refdes', `部品番号の位置を整える（${refBad}）`));
       c.push(chip('multi', st.multi ? '複数選択 ON' : '複数選択', st.multi), layerChip);
       if (st.sel.size) c.push(chip('props', '属性'), chip('rotate', '回転'), chip('flip', '裏返す'), chip('delete', '削除'), chip('clear', '解除'));
       c.push(info);
@@ -129,6 +133,12 @@ export function createPcbEditor(ctx) {
         break;
       }
       case 'autoroute': await autorouteDialog(); break;
+      case 'refdes': {
+        let r;
+        edit((p) => { r = placeRefdes(p); }, '部品番号の位置');
+        ctx.ui.toast(r.conflicts.length ? `${r.moved.length}個を動かしました。置き場所が見つからない番号: ${r.conflicts.join(', ')}（部品の間を空けるか、属性で番号を隠してください）` : `${r.moved.length}個の部品番号をパッドに重ならない位置へ動かしました`, !!r.conflicts.length);
+        break;
+      }
       case 'multi': st.multi = !st.multi; break;
       case 'layer': st.layer = nextLayer(); break;
       case 'props': await editProps(); break;
@@ -320,6 +330,7 @@ export function createPcbEditor(ctx) {
       </select></label>
       <label class="field"><span>信号の線幅 (mm)</span><input type="text" name="w" inputmode="decimal" value="${sigW}"></label>
       <label class="field"><span>電源・GND の線幅 (mm)</span><input type="text" name="pw" inputmode="decimal" value="0.3"></label>
+      ${Object.keys(currentSettings(ctx.getProject()).nets).length ? `<p class="note">電流を設定したネット（${Object.keys(currentSettings(ctx.getProject()).nets).map(esc).join('・')}）は、電流から求めた幅で引きます（検査 →「電流」）。</p>` : ''}
       <p class="note">まだつながっていない接続（未配線 ${st.conn?.unrouted ?? 0} 本）を、設計ルールの間隔を守って引きます。今ある配線・ビアは動かしません。引けなかった接続は一覧で知らせます（部品を動かすか手で引いてください）。終わったら「元に戻す」で取り消せます。内層のベタ（GND・電源の面）へはビアでつながっていれば配線済みとみなします。</p>
     </div>`;
     const r = await ctx.ui.ask('自動配線', html, [{ label: 'キャンセル', value: '' }, { label: '配線する', value: 'ok', cls: 'primary' }]);
@@ -333,7 +344,8 @@ export function createPcbEditor(ctx) {
     let res;
     try {
       ctx.ui.toast('自動配線中…');
-      res = await autoroute(work, rules, { layers, trackWidth: w, powerWidth: pw, yieldEvery: 2, onProgress: (d, n) => { if (Date.now() - t0 > 400) ctx.ui.toast(`自動配線中… ${d}/${n}`); } });
+      const prj = ctx.getProject();
+      res = await autoroute(work, rules, { layers, trackWidth: w, powerWidth: pw, netWidth: (n) => Math.max(0, ...layers.map((l) => netWidthFor(prj, n, l))), yieldEvery: 2, onProgress: (d, n) => { if (Date.now() - t0 > 400) ctx.ui.toast(`自動配線中… ${d}/${n}`); } });
     } catch (e) {
       routing = false;
       ctx.ui.toast(`自動配線に失敗しました: ${e.message}`, true);

@@ -45,6 +45,7 @@ class Heap {
  * @param opt.grid 格子の間隔 mm（既定 0.05）
  * @param opt.trackWidth 信号の線幅 mm（既定 0.15。ルールの最小幅未満にはしない）
  * @param opt.powerWidth 電源・GND の線幅 mm（既定 0.3。パッドより太いとき・通れないときは信号の線幅）
+ * @param opt.netWidth (net) => mm。電流から求めた必要な線幅（0 なら上の既定）。この幅より細くは引かない
  * @param opt.nets 配線するネット（既定: 未配線のある全ネット）
  * @param opt.maxRips はがし直しの総数の上限（既定 300）
  * @param opt.seed 0 以外にすると引く順番を少し変える（結果が悪いときに別の順番を試す）
@@ -367,15 +368,19 @@ export async function autoroute(pcb, rules, opt = {}) {
     const tryOnce = (w, relaxed) => {
       cellPad = new Map();
       const ex = extraCells(w);
-      const src = cellsOf(A.filter((p) => w <= Math.min(p.pad.w, p.pad.h) || w === W), ex, relaxed);
-      const dst = cellsOf(B.filter((p) => w <= Math.min(p.pad.w, p.pad.h) || w === W), ex, relaxed);
+      const src = cellsOf(A.filter((p) => w <= Math.min(p.pad.w, p.pad.h) || w === W || need > 0), ex, relaxed);
+      const dst = cellsOf(B.filter((p) => w <= Math.min(p.pad.w, p.pad.h) || w === W || need > 0), ex, relaxed);
       if (!src.length || !dst.length) return null;
       const end = search(src, new Set(dst), { x: pb0.x, y: pb0.y }, id, w, relaxed);
       if (end < 0) return null;
       let s0 = end; while (from[s0] >= 0) s0 = from[s0];
       return { end, pa: cellPad.get(s0), pb: cellPad.get(end) };
     };
-    const widths = isPower(e.net) ? [PW, W] : [W];
+    // 電流を設定したネットは必要な線幅だけで引く（細い線に逃げない）
+    const need = opt.netWidth ? opt.netWidth(e.net) : 0;
+    // 電流の決まったネット・電源は、まず太め（powerWidth）で引き、通らなければ必要な幅ちょうどまで細くする（必要な幅より細くはしない）
+    const min = need > 0 ? Math.max(W, Math.ceil(need * 1000) / 1000) : W;
+    const widths = (need > 0 || isPower(e.net)) && PW > min ? [PW, min] : [min];
     for (const w of widths) {
       const r = tryOnce(w, false);
       if (r) { commit(e, r.end, w, r.pa, r.pb); return { ok: true, ripped: [] }; }
@@ -403,18 +408,21 @@ export async function autoroute(pcb, rules, opt = {}) {
     if (planeZones.some((z, i) => z.net === e.net && isl.p.has(`P:${i + 1}`) && isl.find(pa.key) === isl.find(`P:${i + 1}`))) return { ok: true, ripped: [] };
     const id = nid(e.net), mask = planeMask.get(e.net);
     const goal = (relaxed) => (s) => { const c = s % N; return mask[c] > 0 && !inPad[c] && freeV(c, id, relaxed); };
-    const ex = extraCells(W);
+    // 電流を設定したネットは、面へのビアまでの引き出しも必要な線幅で
+    const need = opt.netWidth ? opt.netWidth(e.net) : 0;
+    const PWn = need > 0 ? Math.max(W, Math.ceil(need * 1000) / 1000) : W;
+    const ex = extraCells(PWn);
     const saved = maxNodesNow; maxNodesNow = 60000; // 面へは近くで見つかるはず
     try {
       const src = padCells(pa, id, ex, false);
       if (src.length) {
-        const end = search(src, goal(false), null, id, W, false);
-        if (end >= 0) { commit(e, end, W, pa, null); return { ok: true, ripped: [] }; }
+        const end = search(src, goal(false), null, id, PWn, false);
+        if (end >= 0) { commit(e, end, PWn, pa, null); return { ok: true, ripped: [] }; }
       }
       if (!allowRip) return { ok: false, ripped: [] };
       const srcR = padCells(pa, id, ex, true);
       if (!srcR.length) return { ok: false, ripped: [] };
-      const end = search(srcR, goal(true), null, id, W, true);
+      const end = search(srcR, goal(true), null, id, PWn, true);
       if (end < 0) return { ok: false, ripped: [] };
       const vs = blockers(end, id, ex);
       // ビアの位置の相手も
@@ -423,8 +431,8 @@ export async function autoroute(pcb, rules, opt = {}) {
       if (!ripped.length) return { ok: false, ripped: [] };
       for (const k of ripped) rip(k);
       repaintRun();
-      const end2 = search(padCells(pa, id, ex, false), goal(false), null, id, W, false);
-      if (end2 >= 0) { commit(e, end2, W, pa, null); return { ok: true, ripped }; }
+      const end2 = search(padCells(pa, id, ex, false), goal(false), null, id, PWn, false);
+      if (end2 >= 0) { commit(e, end2, PWn, pa, null); return { ok: true, ripped }; }
       return { ok: false, ripped };
     } finally { maxNodesNow = saved; }
   }

@@ -15,6 +15,7 @@ import { hash, sourceHash } from '../netlist/netlist.js';
 export { DRC_DEFAULTS, drcRules } from './rules.js';
 import { drcRules } from './rules.js';
 import pc from '../vendor/polygon-clipping.js';
+import { checkCurrent } from './current.js';
 
 export const DRC_RULES = [
   { id: 'layer_missing', label: '層数より外の層（減らした内層）に残った配線・ベタ' },
@@ -39,6 +40,8 @@ export const DRC_RULES = [
   { id: 'netlist_sync', label: '回路図（ネットリスト）との一致・未配置の部品' },
   { id: 'footprint_unverified', label: '未照合・自動生成のフットプリント' },
   { id: 'zone_overlap', label: '同じ層で重なる別ネットのベタ' },
+  { id: 'track_current', label: '配線幅と電流（IPC-2221 の近似式。ネットごとに設定した最大電流と温度上昇で判定）' },
+  { id: 'via_current', label: 'ビアの本数と電流（めっきの断面からの目安）' },
 ];
 
 export const DRC_UNCHECKED = [
@@ -49,6 +52,8 @@ export const DRC_UNCHECKED = [
   '取付穴（非メッキ）の穴径の範囲',
   '差動ペア・等長配線・インピーダンス',
   '部品外形枠は回転を含む外接矩形で近似（斜め配置は大きめに判定）',
+  '部品の定格（電圧・電流・電力）、ノイズ・パルス、発熱。データシートとの照合が必要です',
+  '電流を設定していないネットの配線幅（電流は「検査」→「電流」で設定）。ベタ（面）の電流容量',
 ];
 
 const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
@@ -342,6 +347,8 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     if (inter.some((poly) => Math.abs(ringAreaMm(poly[0] || [])) > 1e-6)) add('error', 'zone_overlap', `${a.layer} で ${a.net || 'ネットなし'} と ${b.net || 'ネットなし'} のベタの範囲が重なっています（重なるベタの塗り分けは未対応のため、範囲を分けてください）`, [], null);
   }
 
+  for (const i of checkCurrent(project, pcb)) add(i.level, i.rule, i.message, i.refs, i.at);
+
   if (dropped) issues.push({ level: 'warning', rule: 'limit', message: `ほかに ${dropped} 件あります（先頭 ${limit} 件のみ表示）`, refs: [], at: null });
   issues.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1));
   return {
@@ -357,7 +364,7 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
 }
 
 export function drcHash(project, pcb) {
-  return hash(JSON.stringify([pcb, project.board?.rules || {}, project.netlist?.sourceHash || null]));
+  return hash(JSON.stringify([pcb, project.board?.rules || {}, project.board?.current || null, project.board?.fab?.outerCopperOz, project.board?.fab?.innerCopperOz, project.netlist?.sourceHash || null]));
 }
 
 export function drcStatus(project, pcb) {

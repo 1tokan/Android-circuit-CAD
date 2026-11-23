@@ -109,7 +109,11 @@ export function normalizeProject(data) {
     schematic: isObj(p.schematic) && Array.isArray(p.schematic.sheets) ? p.schematic : base.schematic,
     library: isObj(p.library) && Array.isArray(p.library.parts) ? p.library : base.library,
     pcb: isObj(p.pcb) ? { ...base.pcb, ...p.pcb } : base.pcb,
-    board: isObj(p.board) ? { fab: { ...base.board.fab, ...(p.board.fab || {}) }, rules: { ...(p.board.rules || {}) } } : base.board,
+    board: isObj(p.board) ? {
+      fab: { ...base.board.fab, ...(p.board.fab || {}) }, rules: { ...(p.board.rules || {}) },
+      // ネットごとの最大電流と温度上昇（配線幅の検査・自動配線の線幅）
+      ...(isObj(p.board.current) ? { current: { tempRiseC: Number(p.board.current.tempRiseC) || 10, nets: { ...(isObj(p.board.current.nets) ? p.board.current.nets : {}) } } } : {}),
+    } : base.board,
     checks: isObj(p.checks) ? { ...base.checks, ...p.checks } : base.checks,
     settings: isObj(p.settings) ? { ...base.settings, ...p.settings } : base.settings,
   };

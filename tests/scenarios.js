@@ -153,5 +153,6 @@ export async function runPipeline(M, key, { boards = 5, layers = 2, route = fals
     gerber: { files: files.map((f) => f.name.replace(/^.*-/, '')), zipBytes: zipBytes.length },
     assembly: { bomLines: asm.bom.length, cplRows: asm.cpl.length, errors: asm.problems.filter((p) => p.level === 'error').length, bomBytes: bom.length, cplBytes: cpl.length },
     ms: t,
+    project: prj, pcb,
   };
 }

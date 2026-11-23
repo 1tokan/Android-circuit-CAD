@@ -5,6 +5,9 @@ import { runErc, ercStatus } from './erc.js';
 import { runDrc, drcStatus } from './drc.js';
 import { drcRules, baseRules, layerCount } from './rules.js';
 import { esc } from '../core/util.js';
+import { currentSettings, requiredWidthMm, viaCapacityA, layerOz, DEFAULT_TEMP_RISE } from './current.js';
+import { isPowerNet } from '../ai/spec.js';
+import { copperLayers } from '../pcb/model.js';
 
 
 const RULE_LABELS = {
@@ -56,6 +59,50 @@ export function createCheckView(ctx) {
     render();
   }
 
+  // ネットごとの最大電流（配線幅の検査と自動配線の線幅に使う）
+  async function editCurrent() {
+    const p = ctx.getProject(), pcb = ctx.getPcb();
+    const s = currentSettings(p);
+    const nets = [...new Set([...(pcb?.tracks || []).map((t) => t.net), ...(p.netlist?.nets || []).map((n) => n.name)].filter(Boolean))].sort();
+    const shown = [...new Set([...Object.keys(s.nets), ...nets.filter((n) => isPowerNet(n))])];
+    const inner = (pcb ? copperLayers(pcb) : []).some((l) => l !== 'F.Cu' && l !== 'B.Cu');
+    const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
+    const widths = (I, dT) => {
+      if (!(I > 0)) return '—';
+      const o = requiredWidthMm(I, { oz: layerOz(p, 'F.Cu'), tempRiseC: dT });
+      const i = inner ? requiredWidthMm(I, { internal: true, oz: layerOz(p, 'In1.Cu'), tempRiseC: dT }) : 0;
+      return `外層 ${fmt(o)}mm${inner ? `・内層 ${fmt(i)}mm` : ''}`;
+    };
+    const row = (n) => `<label class="rule-row current-row${s.nets[n] ? ' changed' : ''}"><span>${esc(n)}<br><small data-w="${esc(n)}">${widths(s.nets[n], s.tempRiseC)}</small></span><input type="number" step="0.01" min="0" inputmode="decimal" data-net="${esc(n)}" value="${s.nets[n] ?? ''}" placeholder="—"><small>A</small></label>`;
+    const others = nets.filter((n) => !shown.includes(n));
+    const via = pcb?.vias?.length ? Math.min(...pcb.vias.map((v) => v.drill)) / 1e6 : (p.pcb?.settings?.viaDrill || 300000) / 1e6;
+    const pr = ctx.ask('電流と配線幅', `<p class="note">ネットに流れる最大の電流を入れると、必要な配線幅を IPC-2221 の近似式で求め、DRC で細い配線を知らせます。自動配線もこの幅で引きます。空欄のネットは検査しません。銅厚は製造仕様（外層 ${layerOz(p, 'F.Cu')}oz${inner ? `・内層 ${layerOz(p, 'In1.Cu')}oz` : ''}）です。</p>
+      <label class="rule-row"><span>許す温度上昇</span><input type="number" step="1" min="1" inputmode="decimal" data-trise value="${s.tempRiseC}"><small>℃</small></label>
+      <p class="note">ビア1本（穴 ${fmt(via)}mm）の目安: <b data-via>${fmt(viaCapacityA(via, { tempRiseC: s.tempRiseC }))}</b>A</p>
+      <div class="rules" id="current-rows">${shown.map(row).join('') || '<p class="note">電源のネットがありません。下から追加してください。</p>'}</div>
+      ${others.length ? `<label class="field"><span>ネットを追加</span><select data-add><option value="">（選ぶ）</option>${others.map((n) => `<option>${esc(n)}</option>`).join('')}</select></label>` : ''}`,
+      [{ label: 'キャンセル', value: '' }, { label: '保存', value: 'ok', cls: 'primary' }]);
+    const body = document.querySelector('#dialog-body');
+    const dT = () => Number(body.querySelector('[data-trise]').value) || DEFAULT_TEMP_RISE;
+    const refresh = () => {
+      body.querySelectorAll('[data-net]').forEach((el) => { const w = body.querySelector(`[data-w="${CSS.escape(el.dataset.net)}"]`); if (w) w.textContent = widths(Number(el.value), dT()); });
+      body.querySelector('[data-via]').textContent = fmt(viaCapacityA(via, { tempRiseC: dT() }));
+    };
+    body.addEventListener('input', refresh);
+    body.querySelector('[data-add]')?.addEventListener('change', (e) => {
+      const n = e.target.value; if (!n) return;
+      body.querySelector('#current-rows').insertAdjacentHTML('beforeend', row(n));
+      e.target.querySelector(`option[value="${CSS.escape(n)}"]`)?.remove(); e.target.value = '';
+    });
+    const r = await pr;
+    if (r !== 'ok') return;
+    const netsOut = {};
+    body.querySelectorAll('[data-net]').forEach((el) => { const v = Number(el.value); if (el.value !== '' && v > 0) netsOut[el.dataset.net] = v; });
+    ctx.mutate((q) => { q.board.current = { tempRiseC: dT(), nets: netsOut }; }, 'current');
+    ctx.toast(`電流を ${Object.keys(netsOut).length} ネットに設定しました。DRC を実行すると配線幅を検査します`);
+    render();
+  }
+
   function summaryCard(kind, title, desc) {
     const p = ctx.getProject();
     const r = p.checks?.[kind];
@@ -66,7 +113,7 @@ export function createCheckView(ctx) {
     const meta = r ? `<small>${esc(ctx.fmtTime(r.ranAt))} 実行・エラー ${r.summary.errors}・警告 ${r.summary.warnings}${s === 'stale' ? '<br><b class="warn">実行後に変更されています。もう一度実行してください</b>' : ''}</small>` : `<small>${esc(desc)}</small>`;
     return `<div class="check-card${st.tab === kind ? ' on' : ''}" data-tab="${kind}">
       <div class="check-card-head"><b>${title}</b>${badge}</div>${meta}
-      <div class="check-card-actions"><button class="btn primary" data-run="${kind}">${r ? '再実行' : '実行'}</button>${kind === 'drc' ? '<button class="btn" data-rules>ルール</button>' : ''}</div>
+      <div class="check-card-actions"><button class="btn primary" data-run="${kind}">${r ? '再実行' : '実行'}</button>${kind === 'drc' ? '<button class="btn" data-rules>ルール</button><button class="btn" data-current>電流</button>' : ''}</div>
     </div>`;
   }
 
@@ -103,6 +150,7 @@ export function createCheckView(ctx) {
     </div>`;
     ctx.root.querySelectorAll('[data-run]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); run(b.dataset.run); }; });
     ctx.root.querySelector('[data-rules]')?.addEventListener('click', (e) => { e.stopPropagation(); editRules(); });
+    ctx.root.querySelector('[data-current]')?.addEventListener('click', (e) => { e.stopPropagation(); editCurrent(); });
     ctx.root.querySelectorAll('[data-tab]').forEach((c) => { c.onclick = () => { st.tab = c.dataset.tab; st.filter = 'all'; render(); }; });
     ctx.root.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { st.filter = b.dataset.filter; render(); }; });
     ctx.root.querySelectorAll('[data-jump]').forEach((b) => {
@@ -114,6 +162,7 @@ export function createCheckView(ctx) {
     render,
     run,
     editRules,
+    editCurrent,
     setTab(t) { st.tab = t; st.filter = 'all'; render(); },
     get tab() { return st.tab; },
   };

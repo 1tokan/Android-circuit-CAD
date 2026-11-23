@@ -97,6 +97,28 @@ await step('検査タブ: ERC・DRC のエラー 0、未配線 0', async () => {
   await page.screenshot({ path: `${OUT}/sample-check.png` });
 });
 
+await step('検査タブの「電流」: 必要な幅が表示され、電流を上げると DRC が配線幅の不足を警告する', async () => {
+  await ws('check');
+  await page.click('[data-current]');
+  await page.waitForSelector('#dialog-body [data-net="VBUS"]');
+  const w0 = await page.locator('#dialog-body [data-w="VBUS"]').textContent();
+  assert.match(w0, /mm/);
+  await page.fill('#dialog-body [data-net="VBUS"]', '3');
+  const w1 = await page.locator('#dialog-body [data-w="VBUS"]').textContent();
+  assert.notEqual(w0, w1, '入力に合わせて必要な幅が変わる');
+  await page.screenshot({ path: `${OUT}/sample-current.png` });
+  await page.click('#dialog-actions button[value="ok"]');
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(async () => {
+    const { runDrc } = await import('./js/check/drc.js');
+    const p = window.pocketEDA.state.project;
+    const d = runDrc(p, p.pcb);
+    return { a: p.board.current.nets.VBUS, warn: d.issues.filter((i) => i.rule === 'track_current' && /VBUS/.test(i.message)).length, errors: d.summary.errors };
+  });
+  assert.equal(r.a, 3);
+  assert.ok(r.warn >= 1, '3A では VBUS の配線が細すぎる警告が出る');
+});
+
 await step('出力タブ: 4層の注文一覧（.G1）が出る', async () => {
   await ws('output');
   await page.waitForSelector('.order-sheet', { state: 'attached' });
