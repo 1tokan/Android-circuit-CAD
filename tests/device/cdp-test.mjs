@@ -57,6 +57,8 @@ async function tapSelector(sel) {
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await sleep(400);
 }
+const topActivity = () => adb('shell', 'dumpsys', 'activity', 'activities').split('\n').find((l) => /topResumedActivity|mResumedActivity/.test(l)) || '';
+const appOnTop = () => topActivity().includes('jp.tokan.pocketeda');
 const back = async () => { adb('shell', 'input', 'keyevent', 'KEYCODE_BACK'); await sleep(800); };
 // エミュレータが重いとキー入力が届くのが遅れる・取りこぼすことがある。
 // 期待した変化を最大4秒待ち、変化が無いときだけもう1回押す（変化した後に重ねて押すことはない）
@@ -234,15 +236,20 @@ await step('Gerber ZIP を書き出す（Filesystem に保存して共有画面�
   const files = await evaluate(`Capacitor.Plugins.Filesystem.readdir({ path: '', directory: 'CACHE' }).then((r) => r.files.map((f) => ({ name: f.name, size: f.size })))`);
   const zip = files.find((f) => /-gerber\.zip$/.test(f.name));
   if (!zip || zip.size < 1000) throw new Error('ZIP が書かれていない: ' + JSON.stringify(files));
-  await back(); // 共有シートを閉じる
+  // 共有シートを閉じて、アプリが前面に戻るのを確かめる
+  for (let i = 0; i < 3 && !appOnTop(); i++) { await back(); await sleep(700); }
+  if (!appOnTop()) throw new Error('共有シートが閉じない: ' + topActivity().trim());
   return zip;
 });
 
 await step('戻るボタン: 回路図でさらに戻るとアプリが背面へ（終了ではなく保存して最小化）', async () => {
   await evaluate("window.pocketEDA.state.workspace === 'schematic' || (document.querySelector('#ws-nav button[data-ws=\"schematic\"]').click(), true)");
-  await back();
-  await sleep(1500);
-  const top = adb('shell', 'dumpsys', 'activity', 'activities').split('\n').find((l) => /mResumedActivity|topResumedActivity/.test(l)) || '';
+  if (!appOnTop()) throw new Error('試験の前にアプリが前面にない: ' + topActivity().trim());
+  await waitIdle();
+  adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
+  // 保存してから最小化するので、エミュレータでは数秒かかることがある
+  let top = '';
+  for (let i = 0; i < 20; i++) { await sleep(500); top = topActivity(); if (!top.includes('jp.tokan.pocketeda')) break; }
   if (top.includes('jp.tokan.pocketeda')) throw new Error('アプリが前面のまま: ' + top.trim());
   adb('shell', 'am', 'start', '-n', 'jp.tokan.pocketeda/.MainActivity');
   await sleep(2500);
