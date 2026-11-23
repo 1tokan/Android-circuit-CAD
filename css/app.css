@@ -488,3 +488,4 @@ button { font: inherit; color: inherit; }
 .chain { padding: 8px 4px; border-bottom: 1px solid var(--line); }
 .chain small { display: block; margin-top: 2px; opacity: .8; overflow-wrap: anywhere; line-height: 1.5; }
 .log-view { max-height: 55vh; overflow: auto; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-all; background: var(--bg2, #10141b); padding: 8px; border-radius: 8px; }
+.cover.wide li { grid-template-columns: 92px minmax(0, 1fr); }

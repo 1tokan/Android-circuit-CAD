@@ -14,6 +14,7 @@ export const MODULES = [
   { id: 'signal',    name: '信号経路（USB・I2S・アナログ音声）', stage: 5, status: 'ready', note: 'つながり・左右・極性・役割は汎用。設定ピン・レベル・入力インピーダンスは登録した部品（PCM5102A・TPA6132A2・MAX98357A・USBLC6）のみ。ファームウェアは対象外' },
   { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'ready', note: 'RS-274X X2・Excellon・ZIP。ベタの塗りつぶし（クリアランス・サーマル・島除去）を含む' },
   { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'ready', note: 'JLCPCB形式。回転はパッケージ補正表＋部品ごとの手動補正（プレビューで要確認）' },
+  { id: 'kicad',     name: 'KiCad 書き出し（PCB）',   stage: 7, status: 'ready', note: '.kicad_pcb（KiCad 7 形式）・設計ルール。KiCad 7.0.11 で読み込み・照合を確認。回路図は未対応' },
 ];
 
 // 画面上の作業領域（タブ）と、そこで使うモジュール
@@ -22,7 +23,7 @@ export const WORKSPACES = [
   { id: 'pcb',       label: 'PCB',   icon: 'pcb', modules: ['pcb'] },
   { id: 'parts',     label: '部品',  icon: 'parts', modules: ['library', 'lcsc'] },
   { id: 'check',     label: '検査',  icon: 'check', modules: ['erc', 'drc', 'signal'] },
-  { id: 'output',    label: '出力',  icon: 'out', modules: ['gerber', 'bomcpl'] },
+  { id: 'output',    label: '出力',  icon: 'out', modules: ['gerber', 'bomcpl', 'kicad'] },
 ];
 
 // 各作業領域の下部ツール
@@ -63,6 +64,7 @@ export const TOOLS = {
     { id: 'gerber', label: 'Gerber書出', module: 'gerber', icon: 'M12 4v11M7 10l5 5 5-5M5 20h14' },
     { id: 'bom', label: 'BOM', module: 'bomcpl', icon: 'M5 5h14v14H5zM5 10h14M5 15h14M10 5v14' },
     { id: 'cpl', label: 'CPL', module: 'bomcpl', icon: 'M12 3v4M12 17v4M3 12h4M17 12h4M12 9a3 3 0 1 0 0 6a3 3 0 0 0 0-6z' },
+    { id: 'kicad', label: 'KiCad', module: 'kicad', icon: 'M5 4h10l4 4v12H5zM9 12h6M9 16h6' },
   ],
 };
 

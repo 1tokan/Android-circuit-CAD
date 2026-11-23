@@ -9,6 +9,7 @@ import { drcRules } from '../check/rules.js';
 import { autoroute } from './autoroute.js';
 import { placeRefdes, refdesConflicts } from './shapes.js';
 import { addStitchVias, planeSplitCrossings } from './stitch.js';
+import { closeViaPairs, mergeCloseVias } from './viafix.js';
 import { netWidthFor, currentSettings } from '../check/current.js';
 import { renderPcb } from './render.js';
 import { esc } from '../core/util.js';
@@ -105,6 +106,8 @@ export function createPcbEditor(ctx) {
       const refBad = outside ? 0 : refdesConflicts(pcb());
       if (refBad) c.push(chip('refdes', `部品番号の位置を整える（${refBad}）`));
       if (!outside && !st.conn?.unrouted && pcb().zones.some((z) => z.net === 'GND' && (z.layer === 'F.Cu' || z.layer === 'B.Cu'))) c.push(chip('stitch', 'GND のつなぎビア'));
+      const closeVias = outside ? 0 : closeViaPairs(pcb(), drcRules(ctx.getProject())).length;
+      if (closeVias) c.push(chip('viamerge', `近すぎるビアをまとめる（${closeVias}）`, true));
       c.push(chip('multi', st.multi ? '複数選択 ON' : '複数選択', st.multi), layerChip);
       if (st.sel.size) c.push(chip('props', '属性'), chip('rotate', '回転'), chip('flip', '裏返す'), chip('delete', '削除'), chip('clear', '解除'));
       c.push(info);
@@ -150,6 +153,13 @@ export function createPcbEditor(ctx) {
           r = addStitchVias(p, rules, { near: cross, nearRadiusMm: 1.5, pitchMm: 3 });
         }, 'つなぎビア');
         ctx.ui.toast(`つなぎビアを ${r.added.length} 本打ちました（電源層の分割をまたぐ ${cross.length} か所のうち ${r.nearHit} か所の近く）`);
+        break;
+      }
+      case 'viamerge': {
+        // 同じネットで穴の縁が 0.254mm 未満のビア（製造できない）を 1 つにまとめ、配線をつなぎ直す
+        let r;
+        edit((p) => { r = mergeCloseVias(p, drcRules(ctx.getProject())); }, '近すぎるビアをまとめる');
+        ctx.ui.toast(r.kept.length ? `${r.merged} 組をまとめました。${r.kept.length} 組は周りが狭くまとめられません（DRC の位置を確認して手で直してください）` : `近すぎるビアを ${r.merged} 組まとめました`, !!r.kept.length);
         break;
       }
       case 'multi': st.multi = !st.multi; break;

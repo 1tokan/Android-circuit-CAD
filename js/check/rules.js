@@ -16,6 +16,7 @@ const RULES_2L = {
   minPthDrillMm: 0.2,
   maxDrillMm: 6.35,
   minHoleToHoleMm: 0.5,        // 異なるネットの穴どうし（穴の縁から縁）
+  minSameNetHoleMm: 0.254,     // 同じネットの穴どうし（JLCPCB「Via to Via clearance (Same nets)」。近すぎるとドリルが折れる・穴がつながる）
   minNpthToCopperMm: 0.254,    // 取付穴（非メッキ）と銅
   minSilkToPadMm: 0.15,        // シルクとパッド
   minSilkWidthMm: 0.153,       // シルクの線幅

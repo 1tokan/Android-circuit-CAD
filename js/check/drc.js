@@ -25,7 +25,7 @@ export const DRC_RULES = [
   { id: 'short', label: '異なるネットの銅の接触（短絡）' },
   { id: 'clearance', label: '異なるネットの銅の間隔（配線・パッド・ビア、同じ層）' },
   { id: 'edge_clearance', label: '銅と基板外形の間隔・基板外の銅' },
-  { id: 'hole_to_hole', label: '異なるネットの穴どうしの間隔' },
+  { id: 'hole_to_hole', label: '穴どうしの間隔（異なるネット・同じネット）' },
   { id: 'npth_clearance', label: '取付穴（非メッキ）と銅の間隔' },
   { id: 'unrouted', label: '未配線の接続（ラッツネスト）' },
   { id: 'dangling_track', label: '端が何にも接続されていない配線' },
@@ -172,13 +172,16 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   // ---- 穴 ----
   const drills = [];
   for (const p of pads) if (p.pad.type === 'tht') { const h = padHole(p.inst, p.pad); drills.push({ c: { x: p.x, y: p.y }, a: h.a, b: h.b, r: h.d / 2, net: p.net || `~${p.inst.id}:${p.pad.num}`, label: `${p.ref}-${p.pad.num}${h.slot ? '（長穴）' : ''}`, ref: p.ref }); }
-  for (const v of pcb.vias) drills.push({ c: { x: toMm(v.x), y: toMm(v.y) }, r: toMm(v.drill) / 2, net: v.net || `~v:${v.id}`, label: 'ビア' });
+  for (const v of pcb.vias) drills.push({ c: { x: toMm(v.x), y: toMm(v.y) }, r: toMm(v.drill) / 2, net: v.net || `~v:${v.id}`, label: `ビア（${v.net || 'ネットなし'}）` });
   for (const h of pcb.holes) drills.push({ c: { x: toMm(h.x), y: toMm(h.y) }, r: toMm(h.drill) / 2, net: `~h:${h.id}`, label: `取付穴 φ${fmt(toMm(h.drill))}`, npth: true });
   for (let i = 0; i < drills.length; i++) for (let j = i + 1; j < drills.length; j++) {
     const a = drills[i], b = drills[j];
-    if (a.net === b.net) continue;
+    const same = a.net === b.net;
+    if (same && a.ref && a.ref === b.ref) continue; // 同じ部品の穴（部品の設計どおり）
+    const need = same ? R.minSameNetHoleMm : R.minHoleToHoleMm;
+    if (!need) continue;
     const gap = segSegDist(a.a || a.c, a.b || a.c, b.a || b.c, b.b || b.c) - a.r - b.r;
-    if (gap < R.minHoleToHoleMm - 1e-6) add('error', 'hole_to_hole', `穴の間隔不足: ${a.label} と ${b.label}（縁どうし ${fmt(Math.max(0, gap))}mm、最小 ${R.minHoleToHoleMm}mm）`, [a.ref, b.ref].filter(Boolean), midPt(a.c, b.c));
+    if (gap < need - 1e-6) add('error', 'hole_to_hole', `穴の間隔不足${same ? '（同じネット）' : ''}: ${a.label} と ${b.label}（縁どうし ${fmt(Math.max(0, gap))}mm、最小 ${need}mm）`, [a.ref, b.ref].filter(Boolean), midPt(a.c, b.c));
   }
   for (const h of pcb.holes) {
     const hs = circleShape(h.x, h.y, h.drill);

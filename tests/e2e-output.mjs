@@ -163,6 +163,21 @@ await step('部品実装: +90 で手動補正すると CPL の回転が変わり
   assert.equal(await page.evaluate(() => window.pocketEDA.state.project.pcb.footprints.find((q) => q.ref === 'R1').cplRotOffset), undefined);
 });
 
+await step('KiCad: タブから .kicad_pcb・.kicad_pro・.kicad_dru の ZIP を書き出す', async () => {
+  const [k] = await Promise.all([page.waitForEvent('download'), tool('kicad')]);
+  assert.equal(k.suggestedFilename(), 'LED_Test-kicad.zip');
+  const path = `${OUT}/LED_Test-kicad.zip`;
+  await k.saveAs(path);
+  const buf = fs.readFileSync(path);
+  assert.equal(buf.readUInt32LE(0), 0x04034b50);
+  assert.equal(buf.readUInt16LE(buf.length - 22 + 10), 3);
+  const s = buf.toString('utf8');
+  assert.match(s, /LED_Test\/LED_Test\.kicad_pcb/);
+  assert.match(s, /\(kicad_pcb \(version 20221018\) \(generator pocket_eda\)/);
+  assert.match(await page.locator('#output-view').textContent(), /KiCad で確かめ方|KiCad での確かめ方/);
+  await page.screenshot({ path: `${OUT}/output-kicad-phone.png` });
+});
+
 await step('コンソールエラーなし', async () => { assert.deepEqual(errors, []); });
 await browser.close();
 const ng = results.filter((r) => r[0] === 'NG');

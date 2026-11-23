@@ -4,6 +4,7 @@ import { FAB_OPTIONS, LABELS, COLORS, adaptFab, checkFab, orderSheet, stackupTex
 import { layerName } from '../pcb/model.js';
 import { gerberFiles } from './gerber.js';
 import { makeZip } from './zip.js';
+import { kicadFiles } from './kicad.js';
 import { drcStatus } from '../check/drc.js';
 import { buildAssembly, bomCsv, cplCsv, pcbaService } from './assembly.js';
 import { lcscUrl } from '../library/parts.js';
@@ -113,7 +114,8 @@ export function createOutputView(ctx) {
     const sheet = orderSheet({ layers: nL, fab, board: plot.board, files: plot.layerDefs.map((l) => '.' + l.ext.toUpperCase()), holes, minTrack: minTrack < Infinity ? minTrack : 0, minDrill: minDrill < Infinity ? minDrill : 0, smdParts: pcb.footprints.filter((f) => !f.dnp).length, pcba: pcbaService(p, pcb, pcb.footprints.filter((f) => !f.dnp).map((f) => ({ layer: f.side === 'bottom' ? 'Bottom' : 'Top' }))) });
     const chips = ORDER.filter((id) => id === 'drill' || plot.layers[id]).map((id) => `<button class="chip${st.show.has(id) ? ' on' : ''}" data-layer="${id}"><i style="background:${PREVIEW[id].color}"></i>${PREVIEW[id].label}</button>`).join('');
     const files = st.last ? `<details open><summary>前回書き出したファイル（${st.last.files.length}）</summary><ul class="files">${st.last.files.map((f) => `<li><span>${esc(f.name)}</span><small>${(f.content.length / 1024).toFixed(1)} KB</small></li>`).join('')}</ul><p class="note">${esc(ctx.fmtTime(st.last.at))}・ZIP ${(st.last.size / 1024).toFixed(1)} KB</p></details>` : '';
-    const tabs = `<div class="chips seg">${[['gerber', '基板（Gerber）'], ['asm', '部品実装（BOM・CPL）']].map(([k, l]) => `<button class="chip${st.tab === k ? ' on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
+    const tabs = `<div class="chips seg">${[['gerber', '基板（Gerber）'], ['asm', '部品実装（BOM・CPL）'], ['kicad', 'KiCad']].map(([k, l]) => `<button class="chip${st.tab === k ? ' on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>`;
+    if (st.tab === 'kicad') { ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}${kicadHtml(pcb, nL)}</div>`; bindCommon(); ctx.root.querySelector('[data-kicad]').onclick = () => exportKicad(); return; }
     if (st.tab === 'asm') { ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}${assemblyHtml()}</div>`; bindCommon(); bindAssembly(); return; }
     ctx.root.innerHTML = `<div class="check-wrap out-wrap">${tabs}
       <div class="check-card on">
@@ -189,6 +191,39 @@ export function createOutputView(ctx) {
         render();
       };
     });
+  }
+
+  /** KiCad 用の書き出し（PCB） */
+  function kicadHtml(pcb, nL) {
+    const base = String(ctx.getProject().name).replace(/[\\/:*?"<>|\s]+/g, '_') || 'board';
+    return `<div class="check-card on">
+        <div class="check-card-head"><b>KiCad 用（PCB）</b></div>
+        <small>${nL}層・部品 ${pcb.footprints.length}・配線 ${pcb.tracks.length}・ビア ${pcb.vias.length}・ベタ ${pcb.zones.length}・取付穴 ${pcb.holes.length}</small>
+        <div class="check-card-actions"><button class="btn primary" data-kicad>KiCad 用 ZIP を書き出す</button></div>
+      </div>
+      <details open><summary>入っているファイル</summary><ul class="cover wide">
+        <li><span>.kicad_pcb</span>基板（部品の形・パッド・ネット・配線・ビア・ベタの外形・取付穴・シルク・外形）</li>
+        <li><span>.kicad_pro</span>設計ルール（最小配線幅・間隔・ビア・穴など）とネットクラス</li>
+        <li><span>.kicad_dru</span>KiCad の基本設定で表せないルール（パッドと配線の間隔・異なるネットの穴・内層と外形）</li>
+      </ul></details>
+      <details open><summary>KiCad での確かめ方</summary><ol class="howto">
+        <li>ZIP を展開し、フォルダごとパソコンへ（3 つのファイルを同じフォルダに置いたまま）</li>
+        <li>KiCad で ${esc(base)}.kicad_pro を開き、PCB エディタを開く（KiCad 7 の形式。8・9 でも開けます）</li>
+        <li>ベタは外形だけが入っています。「編集 → すべてのゾーンを塗りつぶす」（B キー）で塗る</li>
+        <li>「検査 → デザインルールチェッカー」で DRC を実行（回路図は入っていないので「回路図と PCB の整合」は対象外）</li>
+      </ol>
+      <p class="note">KiCad 7.0.11 で読み込み、パッドの位置・ネット・配線・ビア・ベタの数が一致することを確かめています。KiCad の DRC は Pocket EDA が調べない項目（サーマルのスポーク数・シルクと外形の間隔・コートヤードの重なりなど）も出します。回路図（.kicad_sch）はまだ書き出せません。</p></details>`;
+  }
+
+  async function exportKicad() {
+    const p = ctx.getProject(), pcb = ctx.getPcb();
+    if (!pcb.footprints.length) { ctx.toast('PCB に部品がありません', true); return null; }
+    const files = kicadFiles({ ...p, pcb }, { version: ctx.version });
+    const zip = makeZip(files);
+    const name = `${files[0].name.split('/')[0]}-kicad.zip`;
+    await ctx.download(name, zip, 'application/zip');
+    ctx.toast(`${name} を書き出しました（KiCad で .kicad_pro を開いてください）`);
+    return { files, zip, name };
   }
 
   function bindCommon() {
@@ -279,5 +314,5 @@ export function createOutputView(ctx) {
     return { files, zip };
   }
 
-  return { render, exportZip, exportAssembly, getPlot, setTab(t) { st.tab = t; render(); } };
+  return { render, exportZip, exportAssembly, exportKicad, getPlot, setTab(t) { st.tab = t; render(); } };
 }

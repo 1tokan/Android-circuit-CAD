@@ -9,6 +9,7 @@
 // 単位: mm（基板座標）。PCB には nm で書き込む。
 
 import { allPads, pointInPad, toMm, toNm, boardRect, copperLayers, padHole, addTrackPath, addVia } from './model.js';
+import { mergeCloseVias } from './viafix.js';
 import { DSU } from '../core/util.js';
 import { pointInRing } from '../core/geom2d.js';
 import { computePcbConnectivity } from './connectivity.js';
@@ -459,8 +460,11 @@ export async function autoroute(pcb, rules, opt = {}) {
   for (const e of [...failed.values()]) if (!committed.has(e.k) && routeEdge(e, false).ok) failed.delete(e.k);
   for (const k of [...failed.keys()]) if (committed.has(k)) failed.delete(k);
 
+  // 同じネットで近すぎるビア（穴の縁 0.254mm 未満）を 1 つにまとめる
+  const viaMerge = mergeCloseVias(pcb, rules);
   fillAllZones(pcb, rules);
   return {
+    viaMerge,
     routed: [...committed.values()].map((c) => ({ net: c.edge.net, width: c.w })),
     failed: [...failed.values()].map((e) => { const pa = padByKey.get(e.aKey), pb = e.bKey && padByKey.get(e.bKey); return { net: e.net, a: `${pa.ref}-${pa.pad.num}`, b: pb ? `${pb.ref}-${pb.pad.num}` : '内層の面' }; }),
     tracks: [...committed.values()].reduce((s, c) => s + c.tracks.length, 0),

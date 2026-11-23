@@ -16,7 +16,7 @@ const RULE_LABELS = {
   minTrackWidthMm: '最小配線幅', minClearanceMm: '最小間隔（銅どうし）', minPadClearanceMm: '最小間隔（パッド-配線/ビア）',
   boardEdgeClearanceMm: '基板外形と銅', minViaDrillMm: 'ビア最小穴径', minViaDiameterMm: 'ビア最小外径', minViaAnnularMm: 'ビア最小ランド幅',
   minAnnularRingMm: 'スルーホールパッド最小ランド幅', minPthDrillMm: 'スルーホール最小穴径', maxDrillMm: '最大穴径',
-  minHoleToHoleMm: '穴どうし（異なるネット）', minNpthToCopperMm: '取付穴と銅', minSilkToPadMm: 'シルクとパッド',
+  minHoleToHoleMm: '穴どうし（異なるネット）', minSameNetHoleMm: '穴どうし（同じネット）', minNpthToCopperMm: '取付穴と銅', minSilkToPadMm: 'シルクとパッド',
   innerEdgeClearanceMm: '基板外形と銅（内層）', minMaskBridgeMm: 'レジストの最小ブリッジ幅',
   minSilkWidthMm: 'シルク最小線幅', minSilkTextHeightMm: 'シルク文字の最小高さ', maskExpansionMm: 'レジスト開口の広げ幅',
 };

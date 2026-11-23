@@ -28,7 +28,7 @@ import { esc } from './core/util.js';
 import { log as alog, logError, projectSummary, installErrorHooks, getLog, clearLog, formatLog, flushLog } from './core/applog.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.12.4';
+const APP_VERSION = '0.12.5';
 
 const state = {
   project: null,
@@ -229,6 +229,7 @@ function onTool(id) {
   if (state.workspace === 'parts') { state.partsView.action(id); return; }
   if (state.workspace === 'output') {
     if (id === 'gerber') state.outputView.exportZip();
+    else if (id === 'kicad') { state.outputView.setTab('kicad'); state.outputView.exportKicad(); }
     else { state.outputView.setTab('asm'); state.outputView.exportAssembly(id); }
     return;
   }
