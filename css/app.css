@@ -561,3 +561,9 @@ button { font: inherit; color: inherit; }
 .sim-plot .plot-cursor.b { stroke: #40d0f0; }
 .sim-filter { width: 100%; margin: 4px 0 6px; padding: 6px 8px; background: var(--bg2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
 .sim-progress { color: var(--accent); }
+/* 信号源の波形の入力（0.13.4） */
+.wf-group[hidden] { display: none; }
+.wf-amp { display: flex; gap: 4px; }
+.wf-amp input { flex: 1; min-width: 0; }
+.wf-more summary { font-size: 12px; color: var(--fg2); margin: 4px 0; cursor: pointer; }
+.wf-hint { margin-top: 2px; }

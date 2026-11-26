@@ -1,6 +1,7 @@
 // 回路図の SVG 描画（文字列生成。DOM 操作は呼び出し側）
 import { xform, svgTransform, xformRect } from './geom.js';
-import { getSymbol } from './symbols.js';
+import { getSymbol, kindInfo } from './symbols.js';
+import { sourceShort } from '../sim/waveform.js';
 import { labelRect } from './model.js';
 import { esc } from '../core/util.js';
 
@@ -34,7 +35,8 @@ function symText(g, comp) {
 function fieldText(c, sym) {
   if (sym.isPower) return '';
   const r = xformRect(sym.bbox, c);
-  const val = c.props?.value ?? '';
+  // シミュ用の信号源は SPICE の文でなく「100V 50Hz」のように短く
+  const val = kindInfo(c.kind)?.virtual ? sourceShort(c.props?.value, c.kind) : c.props?.value ?? '';
   const dnp = c.props?.dnp ? ' (DNP)' : '';
   // ピン番号を描く部品（IC・コネクタ等）は側面がピンで埋まるので、常に上下に置く
   if (sym.showPinNumbers || r.x1 - r.x0 >= r.y1 - r.y0) {

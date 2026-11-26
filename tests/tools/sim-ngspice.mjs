@@ -73,6 +73,22 @@ bad += await compare('トランス', C(`${tr}RL a s2 100\n.end`), { ng: 'tran 50
 bad += await compare('トランス', C(`${tr}RL a s2 100\n.end`), { ac: true, ng: 'ac dec 10 1 100k', ours: (s) => s.ac(freqList('dec', 10, 1, 1e5)) }, ['V(a)'], 1e-6);
 bad += await compare('トランス＋ブリッジ整流＋平滑', C(`${tr}D1 a pos DRECT\nD2 s2 pos DRECT\nD3 neg a DRECT\nD4 neg s2 DRECT\nRG neg 0 1m\nC1 pos neg 1000u\nRL pos neg 100\n${DR}\n.end`), { ng: 'tran 50u 100m 0 50u', ours: (s) => s.tran(50e-6, 0.1, { tmax: 50e-6 }) }, ['V(pos)'], 3e-3);
 
+// 0.13.4 のモデル（回路図から作った回路で）: レギュレータ・フォトカプラ・水晶
+{
+  const { projectFromSpec } = await import('../../js/ai/spec.js');
+  const P = (ref, kind, value) => ({ ref, kind, value, package: '', lcsc: '', mpn: '', description: '', pins: [] });
+  const mk = (parts, nets) => { const { project } = projectFromSpec({ title: 't', summary: '', requirements: [], nc: [], notes: [], parts, nets }); project.sim = { sources: [], models: {}, lib: '', probes: [] }; return buildCircuit(project).circuit; };
+  const reg = mk([P('V1', 'vdc', 'DC 6 PWL(0 0 20m 6)'), P('U1', 'regulator', 'AMS1117-3.3'), P('C1', 'capacitor', '10u'), P('R1', 'resistor', '33')],
+    [{ name: 'VIN', pins: ['V1.1', 'U1.3'] }, { name: 'VOUT', pins: ['U1.2', 'C1.1', 'R1.1'] }, { name: 'GND', pins: ['V1.2', 'U1.1', 'C1.2', 'R1.2'] }]);
+  bad += await compare('レギュレータ（入力 0→6V）', reg, { ng: 'tran 20u 25m 0 20u', ours: (s) => s.tran(20e-6, 25e-3, { tmax: 20e-6 }) }, ['V(VOUT)'], 3e-3);
+  const opto = mk([P('V1', 'vdc', 'DC 0 PULSE(0 5 0 1u 1u 50u 100u)'), P('R1', 'resistor', '1k'), P('U1', 'optocoupler', 'PC817'), P('R2', 'resistor', '10k'), P('V2', 'vdc', 'DC 5')],
+    [{ name: 'IN', pins: ['V1.1', 'R1.1'] }, { name: 'A', pins: ['R1.2', 'U1.1'] }, { name: 'VCC', pins: ['V2.1', 'R2.1'] }, { name: 'C', pins: ['R2.2', 'U1.4'] }, { name: 'GND', pins: ['V1.2', 'V2.2', 'U1.2', 'U1.3'] }]);
+  bad += await compare('フォトカプラ', opto, { ng: 'tran 0.2u 200u 0 0.2u', ours: (s) => s.tran(0.2e-6, 200e-6, { tmax: 0.2e-6 }) }, ['V(C)'], 3e-2); // 既知の差 約 2%（受光トランジスタの接合容量。容量を外すと 0.14%）
+  const xt = mk([P('V1', 'vac', 'DC 0 AC 1'), P('R1', 'resistor', '1k'), P('Y1', 'crystal', '12MHz')],
+    [{ name: 'IN', pins: ['V1.1', 'R1.1'] }, { name: 'X', pins: ['R1.2', 'Y1.1'] }, { name: 'GND', pins: ['V1.2', 'Y1.3'] }]);
+  bad += await compare('水晶', xt, { ac: true, ng: 'ac lin 401 11.99meg 12.01meg', ours: (s) => s.ac(freqList('lin', 401, 11.99e6, 12.01e6)) }, ['V(X)'], 1e-3);
+}
+
 // 同梱サンプル: 電源の入口（Q1）を、回路図から作った回路で
 const src = process.argv[2] || new URL('../../samples/usb-dac-amp.json', import.meta.url);
 const prj = JSON.parse(fs.readFileSync(src, 'utf8'));

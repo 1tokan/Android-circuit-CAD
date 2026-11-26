@@ -7,16 +7,10 @@ import { simSettings, buildCircuit, exportSpice, SIM_KINDS, GROUND, defaultPins 
 import { runSimulation } from './run.js';
 import { builtinChoices } from './models.js';
 import { formatValue, parseValue } from './units.js';
+import { sourceFormHtml, bindSourceForm, readSourceForm, sourceFromSpice, sourceToSpice, sourceSummary } from './waveform.js';
 import { plotSvg, plotXAt, plotPxAt, moveCursor, valueAt, measure, fft, COLORS } from './plot.js';
 
 const TYPES = [['op', '動作点'], ['dc', '直流スイープ'], ['ac', 'AC（周波数特性）'], ['tran', '過渡（時間波形）']];
-const WAVES = {
-  none: { label: 'なし（直流）', p: [] },
-  sin: { label: '正弦波 SIN', p: ['中心 VO', '振幅 VA', '周波数 Hz', '遅れ TD s', '減衰 θ 1/s', '位相 °'] },
-  pulse: { label: 'パルス PULSE', p: ['初期 V1', 'パルス V2', '遅れ TD s', '立ち上がり TR s', '立ち下がり TF s', '幅 PW s', '周期 PER s'] },
-  pwl: { label: '折れ線 PWL（時刻 値 …）', p: [] },
-  exp: { label: '指数 EXP', p: ['初期 V1', '到達 V2', '遅れ1 TD1', '時定数1 TAU1', '遅れ2 TD2', '時定数2 TAU2'] },
-};
 const unitOf = (name) => (name.startsWith('V(') ? 'V' : 'A');
 const inner = (name) => name.replace(/^[VI]\((.*)\)$/, '$1');
 // グラフの段（量ごとに分ける。上から この順）
@@ -81,9 +75,10 @@ export function createSimView(ctx) {
 
   function sourcesHtml(s) {
     const sch = schSources();
-    const schHtml = sch.length ? `<p class="note">回路図の信号源（値は回路図の「属性」で変えます）</p><ul class="sim-list">${sch.map((x) => `<li><b>${esc(x.ref)}</b> ${x.kind === 'isrc' ? '電流源' : '電圧源'} ${esc(x.pins[0]?.net || '未接続')} → ${esc(x.pins[1]?.net || '未接続')}・${esc(x.value)}</li>`).join('')}</ul>` : '';
+    const sum = (x) => { try { return sourceSummary(sourceFromSpice(x.value, x.kind === 'isrc' ? 'I' : 'V'), x.kind === 'isrc' ? 'A' : 'V'); } catch { return x.value; } };
+    const schHtml = sch.length ? `<p class="note">回路図の信号源（触れると電圧・周波数などを変えられます）</p><ul class="sim-list">${sch.map((x) => `<li><button type="button" class="link" data-schsrc="${esc(x.ref)}"><b>${esc(x.ref)}</b> ${x.kind === 'isrc' ? '電流源' : '電圧源'} ${esc(x.pins[0]?.net || '未接続')} → ${esc(x.pins[1]?.net || '未接続')}・${esc(sum(x))}</button></li>`).join('')}</ul>` : '';
     if (!s.sources.length) return schHtml + `<p class="note">${sch.length ? 'ここで足す信号源はありません。' : '信号源がありません。回路図に「交流電源」「直流電源」を置くか、'}「＋ 信号源」で、ネットとネット（ふつうは GND）の間に電圧源・電流源を置きます。回路図の電池は自動で電圧源になります。</p>`;
-    return schHtml + `<ul class="sim-list">${s.sources.map((x, i) => `<li><button type="button" class="link" data-src="${i}"><b>${esc(x.name)}</b> ${x.type === 'I' ? '電流源' : '電圧源'} ${esc(x.pos)} → ${esc(x.neg)}・DC ${esc(x.dc || '0')}${x.acMag ? `・AC ${esc(x.acMag)}` : ''}${x.wave?.type && x.wave.type !== 'none' ? `・${x.wave.type.toUpperCase()}(${esc((x.wave.p || []).join(' '))})` : ''}</button></li>`).join('')}</ul>`;
+    return schHtml + `<ul class="sim-list">${s.sources.map((x, i) => `<li><button type="button" class="link" data-src="${i}"><b>${esc(x.name)}</b> ${x.type === 'I' ? '電流源' : '電圧源'} ${esc(x.pos)} → ${esc(x.neg)}・${esc(sourceSummary(x, x.type === 'I' ? 'A' : 'V'))}</button></li>`).join('')}</ul>`;
   }
 
   function modelsHtml() {
@@ -253,27 +248,43 @@ export function createSimView(ctx) {
     const s = S(), nets = netNames();
     const src = i == null ? { id: `src${Date.now()}`, name: `V${s.sources.length + 1}`, type: 'V', pos: nets.find((n) => n !== GROUND && !s.sources.some((x) => x.pos === n || x.neg === n)) || nets.find((n) => n !== GROUND) || '', neg: GROUND, dc: '0', acMag: '', acPh: '', wave: { type: 'none', p: [] } } : structuredClone(s.sources[i]);
     const netSel = (name, v) => `<select name="${name}">${nets.map((n) => `<option ${n === v ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
-    const wtype = src.wave?.type || 'none';
     const html = `<div class="form">
       <div class="form-row"><label class="field small"><span>名前</span><input type="text" name="name" value="${esc(src.name)}"></label><label class="field small"><span>種類</span><select name="type"><option value="V" ${src.type !== 'I' ? 'selected' : ''}>電圧源</option><option value="I" ${src.type === 'I' ? 'selected' : ''}>電流源</option></select></label></div>
       <div class="form-row"><label class="field small"><span>＋のネット</span>${netSel('pos', src.pos)}</label><label class="field small"><span>－のネット</span>${netSel('neg', src.neg)}</label></div>
-      <div class="form-row"><label class="field small"><span>直流 DC</span><input type="text" name="dc" value="${esc(src.dc || '')}" placeholder="0"></label><label class="field small"><span>AC の大きさ</span><input type="text" name="acMag" value="${esc(src.acMag || '')}" placeholder="1"></label><label class="field small"><span>AC の位相°</span><input type="text" name="acPh" value="${esc(src.acPh || '')}" placeholder="0"></label></div>
-      <label class="field"><span>波形（過渡解析）</span><select name="wtype">${Object.entries(WAVES).map(([k, w]) => `<option value="${k}" ${wtype === k ? 'selected' : ''}>${w.label}</option>`).join('')}</select></label>
-      <label class="field"><span>波形の値（空白区切り。${esc(Object.entries(WAVES).filter(([k]) => k !== 'none').map(([k, w]) => `${k.toUpperCase()}: ${w.p.join(' ') || '時刻1 値1 時刻2 値2 …'}`).join(' ／ '))}）</span><input type="text" name="wp" value="${esc((src.wave?.p || []).join(' '))}" placeholder="0 5 1k"></label>
+      ${sourceFormHtml(src, src.type === 'I' ? 'A' : 'V')}
       <p class="note">電流源は SPICE と同じく、＋から源の中を通って－へ流れる向きが正です（回路には－から＋の向きに流れ出ます）。値は 10k・4.7u・1M（メガ）・1m（ミリ）のように書けます。</p></div>`;
     const btns = [{ label: 'キャンセル', value: '' }, ...(i != null ? [{ label: '削除', value: 'del' }] : []), { label: '保存', value: 'ok', cls: 'primary' }];
-    const r = await ctx.ask(i == null ? '信号源を追加' : `信号源 ${src.name}`, html, btns);
+    const pr = ctx.ask(i == null ? '信号源を追加' : `信号源 ${src.name}`, html, btns);
+    bindSourceForm(document.querySelector('#dialog-body'), document.querySelector('#dialog-body [name="type"]'));
+    const r = await pr;
     if (!r) return;
     if (r === 'del') { save((sim) => { sim.sources.splice(i, 1); }); render(); return; }
     const q = (n) => document.querySelector(`#dialog-body [name="${n}"]`).value.trim();
-    const out = { ...src, name: q('name') || src.name, type: q('type'), pos: q('pos'), neg: q('neg'), dc: q('dc'), acMag: q('acMag'), acPh: q('acPh'), wave: { type: q('wtype'), p: q('wp').split(/[\s,]+/).filter(Boolean) } };
-    for (const [k, t] of [['dc', out.dc], ['acMag', out.acMag], ['acPh', out.acPh], ...out.wave.p.map((x) => ['wave', x])]) if (t && !Number.isFinite(parseValue(t))) { ctx.toast(`${k}: 「${t}」を数として読めません`, true); return; }
+    const wf = readSourceForm(document.querySelector('#dialog-body'));
+    if (wf.error) { ctx.toast(wf.error, true); return; }
+    const out = { ...src, name: q('name') || src.name, type: q('type'), pos: q('pos'), neg: q('neg'), ...wf };
     if (out.pos === out.neg) { ctx.toast('＋と－に同じネットは選べません', true); return; }
     // 電圧源どうしの並列は解けない（ngspice も止まる）。ループ全体は計算の前に engine が調べる
     const twin = out.type === 'V' && s.sources.find((x, k) => k !== i && x.type !== 'I' && ((x.pos === out.pos && x.neg === out.neg) || (x.pos === out.neg && x.neg === out.pos)));
     if (twin) { ctx.toast(`${out.pos}–${out.neg} には電圧源 ${twin.name} があります。電圧源を同じネットに 2 つはつなげません（${twin.name} を直すか、別のネットを選んでください）`, true); return; }
-    if (out.wave.type !== 'none' && out.wave.type !== 'pwl' && !out.wave.p.length) { ctx.toast('波形の値を入れてください', true); return; }
     save((sim) => { if (i == null) sim.sources.push(out); else sim.sources[i] = out; });
+    render();
+  }
+
+  /** 回路図の信号源（交流電源など）の電圧・周波数などを変える（値は回路図の部品に SPICE の書き方で入る） */
+  async function editSchSource(ref) {
+    const x = schSources().find((y) => y.ref === ref);
+    if (!x) return;
+    const type = x.kind === 'isrc' ? 'I' : 'V';
+    let cur;
+    try { cur = sourceFromSpice(x.value, type); } catch { cur = sourceFromSpice('', type); }
+    const pr = ctx.ask(`${ref}（${x.kind === 'vac' ? '交流電源' : x.kind === 'vdc' ? '直流電源' : '電流源'}）`, `<div class="form">${sourceFormHtml(cur, type === 'I' ? 'A' : 'V')}</div>`, [{ label: 'キャンセル', value: '' }, { label: '保存', value: 'ok', cls: 'primary' }]);
+    bindSourceForm(document.querySelector('#dialog-body'));
+    if (await pr !== 'ok') return;
+    const wf = readSourceForm(document.querySelector('#dialog-body'));
+    if (wf.error) { ctx.toast(wf.error, true); return; }
+    ctx.applyValue(ref, sourceToSpice(wf));
+    st.result = null;
     render();
   }
 
@@ -293,7 +304,12 @@ export function createSimView(ctx) {
             : c.kind === 'switch' ? `<label class="field small"><span>状態</span><select name="state"><option value="open" ${prm.state !== 'closed' ? 'selected' : ''}>開</option><option value="closed" ${prm.state === 'closed' ? 'selected' : ''}>閉</option></select></label>`
               : c.kind === 'transformer' ? `<p class="note">巻数比は回路図の値（例: 100V:12V）。点は 1 と 4。</p><div class="form-row">${fld('lp', '1 次のインダクタンス H', prm.lp ?? '10')}${fld('k', '結合係数（0〜1）', prm.k ?? '0.999')}</div><div class="form-row">${fld('rp', '1 次の巻線抵抗 Ω', prm.rp ?? '1')}${fld('rs', '2 次の巻線抵抗 Ω', prm.rs ?? '0.1')}</div>`
                 : c.kind === 'fuse' || c.kind === 'ferrite' ? fld('r', '抵抗 Ω（直流）', prm.r ?? '0.05')
-                  : c.kind === 'tvs' ? fld('bv', '降伏電圧 V（空 = 型番から）', prm.bv ?? '') : '';
+                  : c.kind === 'tvs' ? fld('bv', '降伏電圧 V（空 = 型番から）', prm.bv ?? '')
+                    : c.kind === 'regulator' ? `<div class="form-row">${fld('vout', '出力電圧 V（空 = 型番から）', prm.vout ?? '')}${fld('drop', '落差 V（入力 − 出力の最小）', prm.drop ?? '')}</div>`
+                      : c.kind === 'relay' ? `<div class="form-row"><label class="field small"><span>接点</span><select name="state"><option value="off" ${prm.state !== 'on' ? 'selected' : ''}>コイルに電流なし（COM–NC が閉）</option><option value="on" ${prm.state === 'on' ? 'selected' : ''}>コイルに電流あり（COM–NO が閉）</option></select></label>${fld('rcoil', 'コイル抵抗 Ω', prm.rcoil ?? '70')}</div>`
+                        : c.kind === 'optocoupler' ? fld('ctr', '変換効率 CTR（1 = 100%）', prm.ctr ?? '1')
+                          : c.kind === 'crystal' ? `<div class="form-row">${fld('rs', '直列抵抗 Ω', prm.rs ?? '50')}${fld('c1', '直列容量 F', prm.c1 ?? '10f')}${fld('c0', '並列容量 F', prm.c0 ?? '3p')}</div>`
+                            : c.kind === 'buzzer' || c.kind === 'speaker' ? fld('r', 'コイルの抵抗 Ω', prm.r ?? (c.kind === 'buzzer' ? '42' : '')) : '';
     const pins = defaultPins(c.kind, c).join(' ');
     const html = `<div class="form">
       <p class="note">${esc(c.ref)}・${esc(c.kind)}・値 ${esc(c.value)}${c.mpn ? `・${esc(c.mpn)}` : ''}</p>
@@ -316,7 +332,7 @@ export function createSimView(ctx) {
     if (q('spice')) out.spice = q('spice');
     if (q('pins')) out.pins = q('pins');
     const p2 = {};
-    for (const k of ['pos', 'ic', 'rs', 'rint', 'state', 'lp', 'k', 'rp', 'r', 'bv']) {
+    for (const k of ['pos', 'ic', 'rs', 'rint', 'state', 'lp', 'k', 'rp', 'r', 'bv', 'vout', 'drop', 'rcoil', 'ctr', 'c1', 'c0']) {
       if (!q(k)) continue;
       if (k !== 'state' && !Number.isFinite(parseValue(q(k)))) { ctx.toast(`「${q(k)}」を数として読めません`, true); return; }
       p2[k] = q(k);
@@ -343,6 +359,7 @@ export function createSimView(ctx) {
     if (!t || t.disabled) return;
     if (t.dataset.type) { save((sim) => { sim.analysis.type = t.dataset.type; }); st.result = null; render(); return; }
     if (t.dataset.src != null) { await editSource(Number(t.dataset.src)); return; }
+    if (t.dataset.schsrc != null) { await editSchSource(t.dataset.schsrc); return; }
     const tr = t.closest('[data-model]');
     if (tr) { await editModel(tr.dataset.model); return; }
     if (t.dataset.probe) { const n = t.dataset.probe; save((sim) => { sim.probes = sim.probes.includes(n) ? sim.probes.filter((x) => x !== n) : [...sim.probes, n]; }, 'sim:probes'); st.fft = null; render(); return; }

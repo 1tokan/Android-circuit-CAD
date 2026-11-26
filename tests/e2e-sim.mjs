@@ -34,7 +34,7 @@ await step('信号源: サンプルの 2 つ。新しい信号源は空いたネ
   await tool('source');
   const pos = await page.locator('#dialog-body [name="pos"]').inputValue();
   assert.ok(!['VBUS', 'DAC_OUTL', 'GND'].includes(pos), pos);
-  await dialog({ pos: 'VBUS', dc: '5' });
+  await dialog({ pos: 'VBUS', w_dc: '5' });
   await page.waitForFunction(() => /電圧源 VBUS_IN があります/.test(document.body.textContent), null, { timeout: 5000 });
   await page.click('#dialog-actions button[value=""]').catch(() => {});
   assert.equal((await sim()).sources.length, 2);

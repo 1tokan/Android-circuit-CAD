@@ -106,4 +106,39 @@ await step('シミュ用の交流電源は基板・BOM に載らない（ネッ�
   assert.equal(await page.locator('#ctxbar [data-ctx="lcsc"]').count(), 0, 'シミュ用には品番のボタンを出さない');
 });
 
+await step('交流電源の属性: 大きさ（実効値）と周波数を項目で入れられ、回路図に「100V 60Hz」と出る', async () => {
+  await page.locator('#ctxbar [data-ctx="props"]').click(); // V1 を選んだまま
+  await page.waitForSelector('#dialog[open] [name="w_type"]');
+  assert.equal(await page.locator('#dialog [name="w_type"]').inputValue(), 'sin');
+  assert.ok(await page.locator('#dialog .wf-group[data-w="sin"]').isVisible());
+  assert.ok(!(await page.locator('#dialog .wf-group[data-w="pulse"]').isVisible()));
+  assert.equal(await page.locator('#dialog [name="w_sin_amp"]').inputValue(), '100'); // 141.421 のピーク → 実効値 100
+  await page.screenshot({ path: `${OUT}/vac-props-phone.png` });
+  await page.locator('#dialog [name="w_sin_freq"]').fill('60');
+  await page.locator('#dialog-actions button[value="ok"]').click();
+  await page.waitForSelector('#dialog[open]', { state: 'detached' });
+  await page.waitForFunction(() => window.pocketEDA.state.project.schematic.sheets[0].components.find((c) => c.ref === 'V1').props.value === 'DC 0 AC 1 SIN(0 141.421 60)', null, { timeout: 5000 });
+  assert.match(await page.locator('#content').textContent(), /100V 60Hz/);
+  // 波形を変えると欄が入れ替わる・読めない値はことわる
+  await page.locator('#ctxbar [data-ctx="props"]').click();
+  await page.locator('#dialog [name="w_type"]').selectOption('pulse');
+  assert.ok(await page.locator('#dialog .wf-group[data-w="pulse"]').isVisible());
+  await page.locator('#dialog-actions button[value=""]').click();
+});
+
+await step('シミュの画面: 回路図の信号源に触れると同じ欄で変えられる', async () => {
+  await ws('sim');
+  await page.locator('#sim-view details.sim-sec summary', { hasText: '信号源' }).click();
+  const b = page.locator('#sim-view [data-schsrc="V1"]');
+  assert.match(await b.textContent(), /実効値 100V（ピーク 141.4V）・60Hz/);
+  await b.click();
+  await page.waitForSelector('#dialog[open] [name="w_sin_amp"]');
+  await page.locator('#dialog [name="w_sin_kind"]').selectOption('peak');
+  await page.locator('#dialog [name="w_sin_amp"]').fill('10');
+  await page.locator('#dialog [name="w_sin_freq"]').fill('1k');
+  await page.locator('#dialog-actions button[value="ok"]').click();
+  await page.waitForSelector('#dialog[open]', { state: 'detached' });
+  await page.waitForFunction(() => window.pocketEDA.state.project.schematic.sheets[0].components.find((c) => c.ref === 'V1').props.value === 'DC 0 AC 1 SIN(0 10 1k)', null, { timeout: 5000 });
+});
+
 await finish();

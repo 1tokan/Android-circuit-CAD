@@ -176,3 +176,85 @@ test('LCSC 品番の近道: 種別を合わせて変えた部品は、元の部�
   assert.equal(saved.pinMap[2].length, 2, '元の部品データはそのまま');
   assert.deepEqual(assigned[0], ['c:u1']);
 });
+
+import { readSourceForm, sourceFromSpice, sourceToSpice, sourceShort, sourceSummary } from '../js/sim/waveform.js';
+import { regulatorVout } from '../js/sim/circuit.js';
+
+/** 入力欄の代わり（name → 値） */
+const fakeForm = (vals) => ({ querySelector: (sel) => { const n = sel.match(/name="([^"]+)"/)?.[1]; return n in vals ? { value: vals[n] } : null; } });
+
+test('信号源の入力欄: 実効値・周波数から SIN を作る（ピークに直す）、必要な値が無ければことわる', () => {
+  const r = readSourceForm(fakeForm({ w_type: 'sin', w_sin_vo: '', w_sin_amp: '100', w_sin_kind: 'rms', w_sin_freq: '60', w_sin_td: '', w_sin_theta: '', w_sin_phase: '', w_dc: '', w_acMag: '1', w_acPh: '' }));
+  assert.deepEqual(r, { dc: '0', acMag: '1', acPh: '', wave: { type: 'sin', p: ['0', '141.421', '60'] } });
+  assert.equal(sourceToSpice(r), 'DC 0 AC 1 SIN(0 141.421 60)');
+  assert.equal(sourceShort(sourceToSpice(r), 'vac'), '100V 60Hz');
+  const pk = readSourceForm(fakeForm({ w_type: 'sin', w_sin_amp: '5', w_sin_kind: 'peak', w_sin_freq: '1k', w_dc: '' }));
+  assert.deepEqual(pk.wave.p, ['0', '5', '1k']);
+  assert.match(readSourceForm(fakeForm({ w_type: 'sin', w_sin_amp: '100', w_sin_kind: 'rms', w_sin_freq: '', w_dc: '' })).error, /周波数/);
+  assert.match(readSourceForm(fakeForm({ w_type: 'sin', w_sin_amp: 'abc', w_sin_kind: 'rms', w_sin_freq: '50', w_dc: '' })).error, /数として読めません/);
+  // パルス: 途中の空欄は既定、後ろの空欄は省く
+  const pu = readSourceForm(fakeForm({ w_type: 'pulse', w_pulse_v1: '0', w_pulse_v2: '5', w_pulse_td: '1m', w_pulse_tr: '', w_pulse_tf: '', w_pulse_pw: '5m', w_pulse_per: '', w_dc: '' }));
+  assert.deepEqual(pu.wave.p, ['0', '5', '1m', '1u', '1u', '5m']);
+  // 折れ線
+  const pw = readSourceForm(fakeForm({ w_type: 'pwl', w_pwl: '0 0\n1m 5\n2m 5', w_dc: '' }));
+  assert.deepEqual(pw.wave.p, ['0', '0', '1m', '5', '2m', '5']);
+  // 古い書き方（SIN(0 141 50) AC 1）も読み直せる
+  const old = sourceFromSpice('SIN(0 141 50) AC 1');
+  assert.deepEqual([old.wave.type, old.wave.p, old.acMag], ['sin', ['0', '141', '50'], '1']);
+  assert.match(sourceSummary(old), /実効値 99.7V（ピーク 141V）・50Hz/);
+});
+
+test('足りなかったモデル: レギュレータ（出力・落差）・フォトカプラ・水晶・リレー', async () => {
+  assert.deepEqual(['AMS1117-3.3', '7805', 'L7812CV', 'AP2112K-3.3TRG1'].map(regulatorVout), [3.3, 5, 12, 3.3]);
+  assert.ok(Number.isNaN(regulatorVout('LM317')));
+  const mk = (parts, nets, analysis) => { const { project } = projectFromSpec({ ...SUPPLY, parts, nets }); project.sim = { analysis, sources: [], models: {}, lib: '', probes: [] }; return project; };
+  const at = (r, name, t) => r.tran.y[r.names.indexOf(name)][r.tran.t.findIndex((x) => x >= t)];
+  const reg = await runSimulation(mk([P('V1', 'vdc', 'DC 6 PWL(0 0 20m 6)'), P('U1', 'regulator', 'AMS1117-3.3'), P('C1', 'capacitor', '10u'), P('R1', 'resistor', '33')],
+    [{ name: 'VIN', pins: ['V1.1', 'U1.3'] }, { name: 'VOUT', pins: ['U1.2', 'C1.1', 'R1.1'] }, { name: 'GND', pins: ['V1.2', 'U1.1', 'C1.2', 'R1.2'] }],
+    { type: 'tran', tran: { tstep: '20u', tstop: '25m', tstart: '0', tmax: '20u' } }));
+  const vin4 = at(reg, 'V(VOUT)', (4 / 6) * 20e-3);
+  assert.ok(vin4 > 2.7 && vin4 < 3.0, `落差: 入力 4V で ${vin4}`);
+  assert.ok(Math.abs(at(reg, 'V(VOUT)', 24e-3) - 3.3) < 0.01);
+  assert.ok(Math.abs(at(reg, 'V(VOUT)', (5 / 6) * 20e-3) - 3.3) < 0.02, '入力 5V で 3.3V に収まる');
+  const op = (r, n) => r.op.values[r.names.indexOf(n)];
+  const opto = await runSimulation(mk([P('V1', 'vdc', 'DC 5'), P('R1', 'resistor', '1k'), P('U1', 'optocoupler', 'PC817'), P('R2', 'resistor', '10k')],
+    [{ name: 'VCC', pins: ['V1.1', 'R1.1', 'R2.1'] }, { name: 'A', pins: ['R1.2', 'U1.1'] }, { name: 'C', pins: ['R2.2', 'U1.4'] }, { name: 'GND', pins: ['V1.2', 'U1.2', 'U1.3'] }], { type: 'op' }));
+  assert.ok(op(opto, 'V(A)') > 1.1 && op(opto, 'V(A)') < 1.4 && op(opto, 'V(C)') < 0.2);
+  const xt = await runSimulation(mk([P('V1', 'vac', 'DC 0 AC 1'), P('R1', 'resistor', '1k'), P('Y1', 'crystal', '12MHz')],
+    [{ name: 'IN', pins: ['V1.1', 'R1.1'] }, { name: 'X', pins: ['R1.2', 'Y1.1'] }, { name: 'GND', pins: ['V1.2', 'Y1.3'] }], { type: 'ac', ac: { scale: 'lin', points: '201', fstart: '11.99Meg', fstop: '12.01Meg' } }));
+  const i = xt.names.indexOf('V(X)'), mag = xt.ac.re[i].map((re, k) => Math.hypot(re, xt.ac.im[i][k]));
+  assert.ok(Math.abs(xt.ac.f[mag.indexOf(Math.min(...mag))] - 12e6) < 200, '直列共振が 12MHz');
+});
+
+test('信号源の入力欄の見直し: 1M はメガにそろえる・指数の下がり始め・折れ線の時刻の順・AC なしの位相', async () => {
+  const r = readSourceForm(fakeForm({ w_type: 'pulse', w_pulse_v1: '0', w_pulse_v2: '5', w_pulse_td: '', w_pulse_tr: '', w_pulse_tf: '', w_pulse_pw: '1M', w_pulse_per: '2Meg', w_dc: '', w_acMag: '', w_acPh: '30' }));
+  assert.deepEqual(r.wave.p.slice(-2), ['1Meg', '2Meg']); // SPICE の M（ミリ）と取り違えない
+  assert.equal(r.acPh, '');
+  const e = readSourceForm(fakeForm({ w_type: 'exp', w_exp_v1: '0', w_exp_v2: '5', w_exp_td1: '1m', w_exp_tau1: '2m', w_exp_td2: '', w_exp_tau2: '3m', w_dc: '' }));
+  assert.deepEqual(e.wave.p, ['0', '5', '1m', '2m', '3m', '3m']); // 下がり始め = 1m + 2m
+  assert.match(readSourceForm(fakeForm({ w_type: 'pwl', w_pwl: '0 0\n2m 5\n1m 0', w_dc: '' })).error, /増えていく順/);
+  // 回路図の信号源として計算すると、1Meg はメガ
+  const { project } = projectFromSpec({ ...SUPPLY, parts: [P('V1', 'vdc', sourceToSpice(r)), P('R1', 'resistor', '1k')], nets: [{ name: 'A', pins: ['V1.1', 'R1.1'] }, { name: 'GND', pins: ['V1.2', 'R1.2'] }] });
+  const { buildCircuit } = await import('../js/sim/circuit.js');
+  const v1 = buildCircuit(project).circuit.elements.find((x) => x.name === 'V1');
+  assert.equal(v1.wave.p[5], 1e6);
+});
+
+test('リレー（接点の状態・コイル）とレギュレータの設定（出力電圧の上書き・読めない型番はことわる）', async () => {
+  const mk = (parts, nets, analysis, models = {}) => { const { project } = projectFromSpec({ ...SUPPLY, parts, nets }); project.sim = { analysis, sources: [], models: {}, lib: '', probes: [] }; for (const [ref, m] of Object.entries(models)) project.sim.models[project.schematic.sheets[0].components.find((c) => c.ref === ref).id] = m; return project; };
+  const op = (r, n) => r.op.values[r.names.indexOf(n)];
+  const parts = [P('V1', 'vdc', 'DC 5'), P('K1', 'relay', 'SRD-05VDC-SL-C'), P('R1', 'resistor', '1k'), P('R2', 'resistor', '1k')];
+  const nets = [{ name: 'VCC', pins: ['V1.1', 'K1.5', 'K1.1'] }, { name: 'NO', pins: ['K1.3', 'R1.1'] }, { name: 'NC', pins: ['K1.4', 'R2.1'] }, { name: 'GND', pins: ['V1.2', 'K1.2', 'R1.2', 'R2.2'] }];
+  const off = await runSimulation(mk(parts, nets, { type: 'op' }));
+  assert.ok(op(off, 'V(NC)') > 4.99 && op(off, 'V(NO)') < 0.01);
+  const on = await runSimulation(mk(parts, nets, { type: 'op' }, { K1: { mode: 'auto', params: { state: 'on', rcoil: '50' } } }));
+  assert.ok(op(on, 'V(NO)') > 4.99 && op(on, 'V(NC)') < 0.01);
+  assert.ok(Math.abs(-op(on, 'I(V1)') - (5 / 50 + 5 / 1000 / 1)) < 0.002, String(op(on, 'I(V1)'))); // コイル 50Ω ＋ NO 側 1k
+  const rp = [P('V1', 'vdc', 'DC 12'), P('U1', 'regulator', 'MCP1700-3302E'), P('R1', 'resistor', '100')];
+  const rn = [{ name: 'VIN', pins: ['V1.1', 'U1.3'] }, { name: 'VOUT', pins: ['U1.2', 'R1.1'] }, { name: 'GND', pins: ['V1.2', 'U1.1', 'R1.2'] }];
+  const bad = await runSimulation(mk(rp, rn, { type: 'op' })).catch((e) => e);
+  const rows = bad.rows || [];
+  assert.ok(String(bad.message || '').includes('出力電圧') || rows.some((x) => x.ref === 'U1' && x.status === 'error'), '型番から読めない電圧はことわる');
+  const ok = await runSimulation(mk(rp, rn, { type: 'op' }, { U1: { mode: 'auto', params: { vout: '3.3' } } }));
+  assert.ok(Math.abs(op(ok, 'V(VOUT)') - 3.3) < 0.02, String(op(ok, 'V(VOUT)')));
+});

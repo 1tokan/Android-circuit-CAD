@@ -4,6 +4,7 @@
 import { snapPt } from './geom.js';
 import { KINDS, KIND_GROUPS, POWER_NETS, kindInfo, clampPinCount } from './symbols.js';
 import { missingGroups } from '../library/quickpick.js';
+import { sourceFormHtml, bindSourceForm, readSourceForm, sourceFromSpice, sourceToSpice } from '../sim/waveform.js';
 import {
   addComponent, addWirePath, addLabel, routeL, hitTest, itemsInRect, snapTarget, isConnectable,
   moveSelection, rotateSelection, mirrorSelection, deleteSelection, describeSelection, findItem,
@@ -413,12 +414,13 @@ export function createSchematicEditor(ctx) {
     if (info.power) {
       html = f('net', 'ネット名', c.props.net);
     } else if (info.virtual) {
-      // シミュレーション用の信号源: 基板・BOM に載らないので、部品番号と値（SPICE の書き方）だけ
-      html = f('ref', '部品番号', c.ref, 'autocapitalize="characters"') +
-        f('value', '値（SPICE の書き方）', c.props.value, 'placeholder="例: DC 5 / SIN(0 141 50) AC 1 / PULSE(0 5 1m 1u 1u 5m 10m)"') +
-        '<p class="note">シミュレーション用の信号源です（基板・BOM・CPL には載りません）。SIN(オフセット 振幅 周波数)、AC 1 は AC 解析の大きさ。実効値 100V の交流は振幅 141V。</p>';
+      // シミュレーション用の信号源: 基板・BOM に載らないので、部品番号と電圧・周波数など（保存は SPICE の書き方）
+      let cur;
+      try { cur = sourceFromSpice(c.props.value, c.kind === 'isrc' ? 'I' : 'V'); } catch { cur = sourceFromSpice('', 'V'); }
+      html = f('ref', '部品番号', c.ref, 'autocapitalize="characters"') + sourceFormHtml(cur, c.kind === 'isrc' ? 'A' : 'V') +
+        '<p class="note">シミュレーション用の信号源です（基板・BOM・CPL には載りません）。値は 100、4.7k、1m（ミリ）、1Meg（メガ）のように書けます。</p>';
     } else {
-      html = f('ref', '部品番号', c.ref, 'autocapitalize="characters"') + f('value', '値・型番', c.props.value) +
+      html = f('ref', '部品番号', c.ref, 'autocapitalize="characters"') + f('value', info.valueLabel || '値・型番', c.props.value) +
         f('footprint', 'フットプリント', c.props.footprint) + f('lcsc', 'LCSC品番', c.props.lcsc, 'placeholder="例: C17414"') +
         f('mpn', 'メーカー型番', c.props.mpn) + f('manufacturer', 'メーカー', c.props.manufacturer);
       if (c.kind === 'ic' || c.kind === 'connector') {
@@ -431,8 +433,10 @@ export function createSchematicEditor(ctx) {
         ? `<p class="note">部品データ: <b>${esc(part.name)}</b>${part.lcsc ? `（${esc(part.lcsc)}）` : ''}。フットプリントとピン↔パッド対応は部品データのものを使います。</p>`
         : '<p class="note">部品データ未割り当て。「ライブラリから選ぶ」でLCSC品番・フットプリント・ピン対応をまとめて設定できます。</p>';
     }
-    const r = await ctx.ui.ask(`${c.ref} の属性`, `<div class="form">${html}</div>`,
+    const askP = ctx.ui.ask(`${c.ref} の属性`, `<div class="form">${html}</div>`,
       [{ label: 'キャンセル', value: '' }, ...(info.power || info.virtual ? [] : [...(ctx.pickLcsc ? [{ label: 'LCSC で探す', value: 'lcsc' }] : []), { label: 'ライブラリから選ぶ', value: 'lib' }]), ...(c.props.partId ? [{ label: '部品データを外す', value: 'unlink' }] : []), { label: '保存', value: 'ok', cls: 'primary' }]);
+    if (info.virtual) bindSourceForm($('#dialog-body'));
+    const r = await askP;
     if (r === 'lib') { ctx.openLibrary({ key: k, ref: c.ref }); return; }
     if (r === 'unlink') { edit((s) => { delete findItem(s, k).props.partId; }, '部品データを外す'); render(); return; }
     // 「LCSC で探す」は、入力した値を先に保存してから探す（値・足形を直してから探すことがある）
@@ -455,7 +459,9 @@ export function createSchematicEditor(ctx) {
     if (!/^[A-Z#]+\d+$/.test(ref)) { ctx.ui.toast('部品番号は「英字＋数字」で入力してください（例: R1）', true); return; }
     if (isRefTaken(sheet(), ref, c.id)) { ctx.ui.toast(`${ref} は既に使われています`, true); return; }
     if (info.virtual) {
-      edit((s) => { const x = findItem(s, k); x.ref = ref; x.props.value = v('value').value.trim(); }, '属性');
+      const wf = readSourceForm($('#dialog-body'));
+      if (wf.error) { ctx.ui.toast(wf.error, true); return; }
+      edit((s) => { const x = findItem(s, k); x.ref = ref; x.props.value = sourceToSpice(wf); }, '属性');
       render();
       return;
     }

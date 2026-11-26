@@ -16,7 +16,7 @@ import { builtinFor, lookup, DIODES, BJTS, MOSFETS, OPAMPS } from './models.js';
 import { parseSpice, flatten, writeSpice, SpiceError, parseElementLine } from './spice.js';
 import { freqList, sweepList, SimError } from './engine.js';
 
-export const SIM_KINDS = ['resistor', 'pot', 'capacitor', 'electrolytic', 'inductor', 'diode', 'led', 'zener', 'npn', 'pnp', 'nmos', 'pmos', 'opamp', 'switch', 'battery'];
+export const SIM_KINDS = ['resistor', 'pot', 'capacitor', 'electrolytic', 'inductor', 'diode', 'led', 'zener', 'npn', 'pnp', 'nmos', 'pmos', 'opamp', 'switch', 'battery', 'schottky', 'tvs', 'bridge', 'transformer', 'fuse', 'ferrite', 'thermistor', 'speaker', 'buzzer', 'regulator', 'relay', 'optocoupler', 'crystal', 'vac', 'vdc', 'isrc'];
 export const GROUND = 'GND';
 
 export function defaultSim() {
@@ -201,12 +201,79 @@ export function buildCircuit(project, opt = {}) {
           break;
         }
         case 'thermistor': case 'speaker': {
-          elements.push({ type: 'R', name: c.ref, n: [node(1), node(2)], value: val(c.kind === 'speaker' ? v.replace(/Ω|ohm/gi, '') : v, '抵抗値', c.ref) });
+          elements.push({ type: 'R', name: c.ref, n: [node(1), node(2)], value: prm.r ? val(prm.r, '抵抗', c.ref) : val(c.kind === 'speaker' ? v.replace(/Ω|ohm/gi, '') : v, '抵抗値', c.ref) });
           row.model = `抵抗 ${v}`;
           row.note = c.kind === 'thermistor' ? '25°C の値（温度の変化はありません）' : 'インピーダンスを抵抗として（インダクタンスはありません）';
           break;
         }
         case 'testpoint': row.status = 'off'; row.note = '計算に関係しません'; break;
+        case 'regulator': {
+          // 3 端子レギュレータ（1 = GND, 2 = VO, 3 = VI）: 誤差増幅器（線形の電圧制御電圧源）が NPN の通過素子のベースを動かす。
+          // ベースは「入力 − 落差 ＋ 0.7V」でダイオードが抑える（落差より入力が下がると、出力 ≒ 入力 − 落差）。
+          // 入力の電流は通過素子を通る（入力側に負荷が見える）。AMS1117 と同じ NPN 型。
+          // （飽和つきのオペアンプで作ると、帰還の中で動作点が求まらないことがあったので、線形＋ダイオードの押さえにした）
+          const vout = prm.vout ? val(prm.vout, '出力電圧', c.ref) : regulatorVout(c.value || c.mpn);
+          if (!(vout > 0)) throw new SimError(`出力電圧が型番から読めません（${c.value}）。「シミュ」の部品のモデルで出力電圧を入れてください`);
+          const drop = prm.drop ? val(prm.drop, '落差', c.ref) : /^(L|LM|UA|MC|KA|NJM)?78/i.test(c.value || '') ? 2 : 1.1;
+          const [g, o, i] = [node(1), node(2), node(3)];
+          const ref = `${c.ref}#r`, e = `${c.ref}#e`, b = `${c.ref}#b`, cl = `${c.ref}#cl`;
+          elements.push(
+            { type: 'V', name: `${c.ref}_REF`, n: [ref, g], dc: vout },
+            { type: 'E', name: `${c.ref}_EA`, n: [e, g, ref, o], gain: 1e4 },
+            { type: 'R', name: `${c.ref}_RD`, n: [e, b], value: 1e3 },
+            { type: 'V', name: `${c.ref}_OFF`, n: [cl, i], dc: -(drop + 0.05) },
+            { type: 'D', name: `${c.ref}_CL`, n: [b, cl], model: { IS: 1e-14, N: 1 } },
+            { type: 'C', name: `${c.ref}_CB`, n: [b, g], value: 100e-12 },
+            { type: 'Q', name: `${c.ref}_Q`, n: [i, b, o], model: { type: 'npn', IS: 1e-14, BF: 200, BR: 1, VAF: 100 } },
+            { type: 'R', name: `${c.ref}_RQ`, n: [i, g], value: 1e3 }, // 自分の消費（5V で 5mA）
+            { type: 'R', name: `${c.ref}_RL`, n: [o, g], value: 10e3 }, // 最小負荷（無負荷でも出力が決まる）
+          );
+          row.model = `レギュレータ 出力 ${spiceNum(vout)}V・落差 約 ${spiceNum(drop)}V（近似）`;
+          row.note = `電流制限・過熱保護・ノイズはありません${pinNet.get('1') && pinNet.get('1') !== GROUND ? '。GND ピンが GND 以外のときも基準は GND ピン' : ''}`;
+          break;
+        }
+        case 'relay': {
+          // コイル（2–5）は抵抗。接点は状態で決める（コイルの電流で自動では切り替わらない）
+          const on = prm.state === 'on', rc = prm.rcoil ? val(prm.rcoil, 'コイル抵抗', c.ref) : 70;
+          elements.push({ type: 'R', name: `${c.ref}_COIL`, n: [node(2), node(5)], value: rc },
+            { type: 'R', name: `${c.ref}_NO`, n: [node(1), node(3)], value: on ? 0.05 : 1e9 },
+            { type: 'R', name: `${c.ref}_NC`, n: [node(1), node(4)], value: on ? 1e9 : 0.05 });
+          row.model = `リレー コイル ${spiceNum(rc)}Ω・${on ? 'COM–NO が閉' : 'COM–NC が閉'}`;
+          row.note = '接点はコイルの電流では切り替わりません（モデルの画面で状態を選ぶ）';
+          break;
+        }
+        case 'optocoupler': {
+          // 1 = A, 2 = K（赤外 LED）, 3 = E, 4 = C。LED の電流 × 変換効率（CTR）を受光トランジスタのコレクタ電流に
+          const ctr = prm.ctr ? val(prm.ctr, '変換効率', c.ref) : 1;
+          const mid = `${c.ref}#m`, b = `${c.ref}#b`, BF = 100;
+          elements.push(
+            { type: 'R', name: `${c.ref}_RS`, n: [node(1), mid], value: 0.1 },
+            { type: 'D', name: `${c.ref}_LED`, n: [mid, node(2)], model: { IS: 1e-14, N: 1.8, RS: 1, CJO: 20e-12 } },
+            { type: 'G', name: `${c.ref}_PH`, n: [node(4), b, node(1), mid], gm: ctr / BF / 0.1 },
+            { type: 'Q', name: `${c.ref}_Q`, n: [node(4), b, node(3)], model: { type: 'npn', IS: 1e-14, BF, BR: 1, VAF: 100, CJC: 5e-12 } },
+            { type: 'R', name: `${c.ref}_RBE`, n: [b, node(3)], value: 1e6 },
+          );
+          row.model = `フォトカプラ CTR ${Math.round(ctr * 100)}%（近似）`;
+          break;
+        }
+        case 'crystal': {
+          // 水晶の等価回路（直列の R・L・C と並列の C0）。1・3 = 水晶、2・4 = ケース（計算では使わない）
+          const f0 = val(v, '周波数', c.ref);
+          const rs = prm.rs ? val(prm.rs, '直列抵抗', c.ref) : 50, c1 = prm.c1 ? val(prm.c1, '直列容量', c.ref) : 10e-15, c0 = prm.c0 ? val(prm.c0, '並列容量', c.ref) : 3e-12;
+          const l1 = 1 / ((2 * Math.PI * f0) ** 2 * c1);
+          const a = `${c.ref}#a`, b = `${c.ref}#b`;
+          elements.push({ type: 'R', name: `${c.ref}_R1`, n: [node(1), a], value: rs }, { type: 'L', name: `${c.ref}_L1`, n: [a, b], value: l1 },
+            { type: 'C', name: `${c.ref}_C1`, n: [b, node(3)], value: c1 }, { type: 'C', name: `${c.ref}_C0`, n: [node(1), node(3)], value: c0 });
+          row.model = `水晶 ${spiceNum(f0)}Hz（R ${spiceNum(rs)}Ω・C1 ${spiceNum(c1)}F・C0 ${spiceNum(c0)}F）`;
+          break;
+        }
+        case 'buzzer': {
+          const r = prm.r ? val(prm.r, '抵抗', c.ref) : 42;
+          elements.push({ type: 'R', name: c.ref, n: [node(1), node(2)], value: r });
+          row.model = `抵抗 ${spiceNum(r)}Ω`;
+          row.note = '音・インダクタンスはありません（電磁式のコイルの直流抵抗として）';
+          break;
+        }
         case 'npn': case 'pnp': {
           const b = mode === 'builtin' && set.key ? { key: set.key, ...lookup(BJTS, set.key) } : builtinFor(c.kind, c.value, c.mpn);
           elements.push({ type: 'Q', name: c.ref, n: [node(3), node(1), node(2)], model: { ...b.m } });
@@ -243,7 +310,7 @@ export function buildCircuit(project, opt = {}) {
         }
         default:
           row.status = 'off';
-          row.note = ['ic', 'connector', 'regulator', 'optocoupler', 'relay', 'crystal'].includes(c.kind) ? 'モデルなし（SPICE のサブ回路を割り当てると計算に入ります）。ピンは何もつながっていない扱い' : 'モデルなし';
+          row.note = ['ic', 'connector'].includes(c.kind) ? 'モデルなし（SPICE のサブ回路を割り当てると計算に入ります）。ピンは何もつながっていない扱い' : 'モデルなし';
       }
     } catch (e) {
       if (!(e instanceof SimError || e instanceof SpiceError)) throw e;
@@ -326,6 +393,17 @@ export function tieIsolated(elements, warnings = []) {
     warnings.push(`${at}${nodes.length > 1 ? ` など ${nodes.length} 個のノード` : ''} は GND とつながっていないので、1kΩ で GND に結びました（つながりが無いので電流は流れません）`);
   }
   return elements;
+}
+
+/** レギュレータの型番 → 出力電圧（AMS1117-3.3 → 3.3、7805・L7812CV → 5・12）。読めなければ NaN */
+export function regulatorVout(name) {
+  const t = String(name || '').toUpperCase().trim();
+  // 78xx は頭（L・LM・UA・MC・KA の後）にあるものだけ（TPS78233 などを 23V と読まない）
+  const m78 = t.match(/^(?:L|LM|UA|MC|KA|NJM)?78[LM]?(\d{2})(?!\d)/);
+  const m = m78 ? null : t.match(/-(\d+\.\d+|\d+)/);
+  const v = m78 ? Number(m78[1]) : m ? Number(m[1]) : NaN;
+  // 3302 や 33 のように、型番の数字が電圧そのものでないものは読まない（モデルの画面で入れてもらう）
+  return v >= 0.5 && v <= 40 && !(m && /^\d{2,}$/.test(m[1]) && !m78) ? v : NaN;
 }
 
 /** 解析の設定 → SPICE の解析の文 */
