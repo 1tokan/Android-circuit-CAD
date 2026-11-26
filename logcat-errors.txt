@@ -1,0 +1,1 @@
+11-26 12:52:40.423  3921  3921 E chromium: [ERROR:filesystem_posix.cc(62)] mkdir /data/user/0/jp.tokan.pocketeda/cache/WebView/Crashpad: No such file or directory (2)
