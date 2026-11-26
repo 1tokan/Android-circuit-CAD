@@ -205,6 +205,19 @@ export function guessKind(text) {
   }
   // 3) 個別部品（単語単位）
   if (w('potentiometers?|trimmers?|variable resistors?|trimpots?') || /可変抵抗|半固定/.test(t)) return 'pot';
+  // 0.13.3 で足した種別（ダイオード・インダクタ・抵抗の一般の語より先に）
+  if (w('bridge rectifiers?|rectifier bridges?|diode bridges?|bridge diodes?') || /ブリッジ/.test(t)) return 'bridge';
+  if (w('fuses?|resettable fuses?|polyfuses?|pptc') || /ヒューズ/.test(t)) return 'fuse';
+  if (w('thermistors?|ntc') || /サーミスタ/.test(t)) return 'thermistor';
+  if (w('ferrite beads?|ferrites?') || /フェライト/.test(t)) return 'ferrite';
+  if (w('crystals?|crystal resonators?|ceramic resonators?|resonators?') || /水晶|振動子/.test(t)) return 'crystal';
+  if (w('relays?') || /リレー/.test(t)) return 'relay';
+  if (w('transformers?') || /トランス/.test(t)) return 'transformer';
+  if (w('buzzers?|beepers?') || /ブザー/.test(t)) return 'buzzer';
+  if (w('speakers?|loudspeakers?') || /スピーカ/.test(t)) return 'speaker';
+  if (w('test points?|testpoints?')) return 'testpoint';
+  if (w('schottky') || /ショットキ/.test(t)) return 'schottky';
+  if (w('bidirectional|bi-directional') && w('tvs|esd protection|transient voltage suppressors?')) return 'tvs';
   if (w('aluminum electrolytic|electrolytic|tantalum|polymer capacitors?') || /電解/.test(t)) return 'electrolytic';
   if (w('zener')) return 'zener';
   if (w('light emitting diodes?|leds?') || /発光ダイオード/.test(t)) return 'led';
@@ -243,7 +256,7 @@ export function guessFootprint(kind, pkg) {
   const p = String(pkg || '').toUpperCase().replace(/\s/g, '');
   const size = p.match(/\b(0402|0603|0805|1206)\b/)?.[1] || ['0402', '0603', '0805', '1206'].find((s) => p.includes(s));
   if (size) {
-    const pre = { resistor: 'R', capacitor: 'C', inductor: 'L', led: 'LED' }[kind];
+    const pre = { resistor: 'R', thermistor: 'R', capacitor: 'C', inductor: 'L', ferrite: 'L', led: 'LED', fuse: 'Fuse' }[kind];
     if (pre && getFootprint(`${pre}_${size}`)) return `${pre}_${size}`;
   }
   const table = [
@@ -252,7 +265,9 @@ export function guessFootprint(kind, pkg) {
     [/^SOIC-?8|^SOP-?8$/, 'SOIC-8'], [/^SOIC-?14|^SOP-?14$/, 'SOIC-14'], [/^SOIC-?16|^SOP-?16$/, 'SOIC-16'],
     [/^TSSOP-?8$/, 'TSSOP-8'], [/^TSSOP-?14$/, 'TSSOP-14'], [/^TSSOP-?20$/, 'TSSOP-20'],
     [/^DIP-?8$/, 'DIP-8'], [/^DIP-?14$/, 'DIP-14'], [/^DIP-?16$/, 'DIP-16'],
+    [/^DIP-?4$/, 'DIP-4'], [/^(MBS|TO-?269)/, 'TO-269AA'],
   ];
+  if (kind === 'crystal' && /3225|3\.2X2\.5/.test(p) && /4P|4PIN|-4/.test(p)) return 'Crystal_SMD_3225-4Pin_3.2x2.5mm';
   // 1列ピンヘッダ（2.54mm）・JST PH（2.0mm）は内蔵の KiCad 照合済みのものへ
   const hdr = /^(?:PIN)?(?:HEADER|HDR)[-_]?1X0?(\d{1,2})(?!.*(?:2\.0|2MM|1\.27))/.exec(p);
   if (hdr && getFootprint(`PinHeader_1x${hdr[1].padStart(2, '0')}_P2.54mm`)) return `PinHeader_1x${hdr[1].padStart(2, '0')}_P2.54mm`;

@@ -10,6 +10,11 @@ export const DIODES = {
   '1N4148': { label: '1N4148（小信号）', m: D({ IS: 2.52e-9, N: 1.752, RS: 0.568, BV: 100, IBV: 100e-6, CJO: 4e-12, M: 0.333, VJ: 0.5, TT: 11.5e-9 }) },
   '1N4148W': { alias: '1N4148' },
   BAT54: { label: 'BAT54（ショットキー）', m: D({ IS: 2e-7, N: 1.04, RS: 1.2, BV: 30, IBV: 1e-6, CJO: 10e-12, M: 0.5, VJ: 0.35 }) },
+  // 0.13.3: 一般的な値から作った近似（データシートの代表値の I-V に合わせた程度）
+  SS34: { label: 'SS34（ショットキー 3A・近似）', m: D({ IS: 1.5e-5, N: 1.1, RS: 0.03, BV: 40, IBV: 1e-3, CJO: 250e-12, M: 0.5, VJ: 0.35 }) },
+  // 逆回復（TT）は入れない: 商用周波数の整流ではほぼ効かず、大きな TT は計算の刻みを細かくしすぎる（今のエンジンは拡散容量を電荷でなく容量で扱うため）
+  RECT: { label: '整流用（1N4007・MBxS 相当の近似、逆回復は省略）', m: D({ IS: 7e-9, N: 1.8, RS: 0.04, BV: 1000, IBV: 5e-6, CJO: 10e-12, M: 0.33, VJ: 0.5 }) },
+  '1N4007': { alias: 'RECT' }, MB10S: { alias: 'RECT' }, MB6S: { alias: 'RECT' }, MB2S: { alias: 'RECT' }, MB4S: { alias: 'RECT' },
   SS14: { label: 'SS14（ショットキー 1A）', m: D({ IS: 5e-6, N: 1.1, RS: 0.05, BV: 40, IBV: 1e-3, CJO: 110e-12, M: 0.5, VJ: 0.35 }) },
   BZT52C5V1: { label: 'BZT52C5V1（ツェナー 5.1V）', m: D({ IS: 1e-14, N: 1, RS: 1, BV: 5.1, IBV: 5e-3, NBV: 1.5, CJO: 100e-12 }) },
   // 双方向の ESD 保護（約 6V で導通）。片方向の近似（逆向きもツェナーとして導通）
@@ -61,7 +66,7 @@ export const OPAMPS = {
   NE5532: { label: 'NE5532（GBW 10MHz）', m: OA({ A: 1e5, GBW: 10e6, ROUT: 0.3, VOH: 1.5, VOL: 1.5 }) },
 };
 
-const LIBS = { diode: DIODES, led: DIODES, zener: DIODES, npn: BJTS, pnp: BJTS, nmos: MOSFETS, pmos: MOSFETS, opamp: OPAMPS };
+const LIBS = { diode: DIODES, led: DIODES, zener: DIODES, schottky: DIODES, bridge: DIODES, tvs: DIODES, npn: BJTS, pnp: BJTS, nmos: MOSFETS, pmos: MOSFETS, opamp: OPAMPS };
 
 /** 名前（大文字小文字・空白・- を無視）で引く */
 export function lookup(lib, name) {
@@ -86,6 +91,8 @@ export function builtinFor(kind, value, mpn = '') {
   if (kind === 'npn' || kind === 'pnp') return { key: `GENERIC_${kind.toUpperCase()}`, ...BJTS[`GENERIC_${kind.toUpperCase()}`], guessed: true };
   if (kind === 'nmos' || kind === 'pmos') return { key: `GENERIC_${kind.toUpperCase()}`, ...MOSFETS[`GENERIC_${kind.toUpperCase()}`], guessed: true };
   if (kind === 'opamp') return { key: 'GENERIC', ...OPAMPS.GENERIC, guessed: true };
+  if (kind === 'schottky') return { key: 'SS14', ...DIODES.SS14, guessed: true };
+  if (kind === 'bridge') return { key: 'RECT', ...DIODES.RECT, guessed: true };
   return { key: 'GENERIC', ...DIODES.GENERIC, guessed: true };
 }
 

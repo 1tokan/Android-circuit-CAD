@@ -73,6 +73,11 @@ const LIST = [
   kfp('Crystal_SMD_3225-4Pin_3.2x2.5mm', '水晶 3225 4ピン', ''),
   kfp('TestPoint_Pad_1.0x1.0mm', 'テストパッド 1.0mm角（部品なし）'),
   kfp('USB_C_HRO_TYPE-C-31-M-12', 'USB Type-C 受け口 16P（HRO TYPE-C-31-M-12。位置決めの穴 2 つつき。部品と一緒に動く）'),
+  kfp('Fuse_0805', 'チップヒューズ 0805(2012)', '0805'), kfp('Fuse_1206', 'チップヒューズ 1206(3216)', '1206'),
+  kfp('TO-269AA', 'ブリッジダイオード MBS(TO-269AA)（1=~, 2=~, 3=+, 4=-）', 'MBS', { polarity: true }),
+  kfp('DIP-4', 'DIP 4ピン 7.62mm幅（フォトカプラ PC817: 1=A, 2=K, 3=E, 4=C）', 'DIP-4', { polarity: true }),
+  kfp('Relay_SANYOU_SRD', 'リレー SANYOU SRD（Songle SRD 互換。1=COM, 2・5=コイル, 3=NO, 4=NC）', ''),
+  kfp('Buzzer_12x9_5RM7_6', 'ブザー φ12 ピッチ7.6mm THT（1=+）', '', { polarity: true }),
   kfp('Jack_3.5mm_CUI_SJ-3524-SMT_Horizontal', '3.5mm ジャック SMT 横向き（CUI SJ-3524-SMT。位置決めの穴 2 つつき。部品と一緒に動く）'),
   // 半固定抵抗（3端子インライン 2.54mm）。KiCad 公式に同じ形が無いので寸法は自前（3362P は端子が三角配置なので別途要確認）
   finish({ id: 'Trimmer_3P_Inline_P2.54', name: 'Trimmer_3P_Inline_P2.54', desc: '半固定抵抗 3端子インライン 2.54mm（1,3=両端, 2=ワイパ）', package: 'TH-3P', pads: [tht(1, -2.54, 0, 1.8, 1.0, 'rect'), tht(2, 0, 0, 1.8, 1.0), tht(3, 2.54, 0, 1.8, 1.0)], body: { w: 9.5, h: 5 }, source: '汎用（実部品の図面で要確認）' }),

@@ -43,11 +43,13 @@ export function generateNetlist(project, { now = new Date().toISOString() } = {}
   const warn = (message, ref) => problems.push({ level: 'warning', ref, message });
 
   const conn = computeConnectivity(sheet);
-  const comps = sheet.components.filter((c) => !kindInfo(c.kind)?.power);
+  const comps = sheet.components.filter((c) => !kindInfo(c.kind)?.power && !kindInfo(c.kind)?.virtual);
+  // シミュレーション用の信号源（交流・直流・電流源）は基板・BOM に載せず、別の一覧に入れる
+  const virt = sheet.components.filter((c) => kindInfo(c.kind)?.virtual);
 
   // 部品番号の検査
   const seen = new Map();
-  for (const c of comps) {
+  for (const c of [...comps, ...virt]) {
     if (!/^[A-Z]+\d+$/.test(c.ref)) err(`部品番号 ${c.ref} が「英字＋数字」になっていません`, c.ref);
     if (seen.has(c.ref)) err(`部品番号 ${c.ref} が重複しています`, c.ref);
     seen.set(c.ref, c);
@@ -87,6 +89,11 @@ export function generateNetlist(project, { now = new Date().toISOString() } = {}
     });
   }
 
+  const simSources = virt.sort((a, b) => cmpRef(a.ref, b.ref)).map((c) => ({
+    ref: c.ref, compId: c.id, kind: c.kind, value: c.props?.value ?? '',
+    pins: getSymbol(c).pins.map((p) => ({ num: p.num, name: p.name, net: pinNet.get(`${c.id}:${p.num}`) || null })),
+  }));
+
   // ネット（パッド単位のノード）
   const nets = [];
   let code = 1;
@@ -121,6 +128,7 @@ export function generateNetlist(project, { now = new Date().toISOString() } = {}
     generatedAt: now,
     sourceHash: sourceHash(project),
     components,
+    simSources,
     nets,
     problems,
     summary: {

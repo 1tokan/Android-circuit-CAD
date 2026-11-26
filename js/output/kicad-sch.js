@@ -186,7 +186,8 @@ function symbolDef(name, comp, sym, nlComp, fpPads) {
   const ref = power ? '#PWR' : (kindInfo(comp.kind)?.prefix || 'U');
   const showNums = !power && !!sym.showPinNumbers;
   const lines = [];
-  lines.push(`  (symbol ${q(name)}${power ? ' (power)' : ''}${showNums ? '' : ' (pin_numbers hide)'} (pin_names (offset 0.254) hide) (in_bom ${power ? 'no' : 'yes'}) (on_board ${power ? 'no' : 'yes'})`);
+  const virt = !!kindInfo(comp.kind)?.virtual; // シミュレーション用の信号源は BOM・基板に載せない
+  lines.push(`  (symbol ${q(name)}${power ? ' (power)' : ''}${showNums ? '' : ' (pin_numbers hide)'} (pin_names (offset 0.254) hide) (in_bom ${power || virt ? 'no' : 'yes'}) (on_board ${power || virt ? 'no' : 'yes'})`);
   lines.push(`    (property "Reference" ${q(ref)} (id 0) (at 0 ${mm(-(sym.bbox.y0) + 1)} 0) (effects (font (size 1.27 1.27))${power ? ' hide' : ''}))`);
   lines.push(`    (property "Value" ${q(power ? comp.props?.net || 'GND' : name)} (id 1) (at 0 ${mm(-(sym.bbox.y1) - 1)} 0) (effects (font (size 1.27 1.27))))`);
   lines.push(`    (property "Footprint" "" (id 2) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))`);
@@ -397,7 +398,8 @@ export function kicadSch(project, built, { projectName = 'board', fpLibId = () =
     const nlc = info.nlComp;
     const fp = power ? '' : fpLibId(c.id) || '';
     L.push(`  (symbol (lib_id ${q(`${SYM_LIB}:${info.name}`)}) (at ${X(c.x)} ${Y(c.y)} ${o.angle})${o.mirror ? ' (mirror y)' : ''} (unit 1)`);
-    L.push(`    (in_bom ${power ? 'no' : 'yes'}) (on_board ${power ? 'no' : 'yes'}) (dnp ${props.dnp ? 'yes' : 'no'})`);
+    const virt = !!kindInfo(c.kind)?.virtual;
+    L.push(`    (in_bom ${power || virt ? 'no' : 'yes'}) (on_board ${power || virt ? 'no' : 'yes'}) (dnp ${props.dnp ? 'yes' : 'no'})`);
     L.push(`    (uuid ${uuid})`);
     const prop = (k, v, id, at, hide, j = '') => L.push(`    (property ${q(k)} ${q(v)} (id ${id}) (at ${X(at.x)} ${Y(at.y)} 0) (effects (font (size 1.27 1.27))${j}${hide ? ' hide' : ''}))`);
     prop('Reference', ref, 0, refAt, power, just);

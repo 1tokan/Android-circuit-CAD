@@ -117,7 +117,12 @@ export function parseElementLine(l) {
     case 'Q': return { type: 'Q', name, n: [pos[0], pos[1], pos[2]], modelName: pos[pos.length >= 5 && !/^\d/.test(pos[4]) ? 4 : 3], area: 1 };
     case 'M': return { type: 'M', name, n: [pos[0], pos[1], pos[2], pos[3]], modelName: pos[4], W: params.W ? num(params.W) : 1e-4, L: params.L ? num(params.L) : 1e-4 };
     case 'X': return { type: 'X', name, n: pos.slice(0, -1), subckt: pos[pos.length - 1] };
-    default: throw new SpiceError(`${name}: 素子 ${c} は扱えません（R C L V I E G D Q M X のみ）`);
+    case 'K': {
+      // 結合: K名 L名 L名 結合係数（トランス）
+      if (pos.length < 3) throw new SpiceError(`${name}: インダクタ 2 つと結合係数が要ります（例: K1 L1 L2 0.999）`);
+      return { type: 'K', name, n: [], l: [pos[0], pos[1]], k: num(pos[2]) };
+    }
+    default: throw new SpiceError(`${name}: 素子 ${c} は扱えません（R C L K V I E G D Q M X のみ）`);
   }
 }
 
@@ -141,6 +146,7 @@ export function flatten(parsed, { models = parsed.models, subckts = parsed.subck
     const nm = (n) => { const s = String(n); if (s === '0' || /^gnd$/i.test(s)) return '0'; if (map && map.has(s)) return map.get(s); return prefix ? `${prefix}.${s}` : s; };
     for (const e0 of els) {
       const e = { ...e0, name: prefix ? `${prefix}.${e0.name}` : e0.name, n: e0.n.map(nm) };
+      if (e.type === 'K') e.l = e0.l.map((x) => (prefix ? `${prefix}.${x}` : x));
       if (e.type === 'X') {
         const sc = subckts.get(String(e0.subckt).toLowerCase());
         if (!sc) throw new SpiceError(`サブ回路 ${e0.subckt} がありません`);
@@ -177,7 +183,7 @@ export function toCircuit(elements) {
 }
 
 // ---------------- 書く ----------------
-const PREFIX = { R: 'R', C: 'C', L: 'L', V: 'V', I: 'I', E: 'E', G: 'G', D: 'D', Q: 'Q', M: 'M', OA: 'X' };
+const PREFIX = { K: 'K', R: 'R', C: 'C', L: 'L', V: 'V', I: 'I', E: 'E', G: 'G', D: 'D', Q: 'Q', M: 'M', OA: 'X' };
 
 /** 名前を SPICE の名前に（頭の文字を種類に合わせ、使えない文字を _ に） */
 export function spiceName(type, name) {
@@ -230,6 +236,7 @@ export function writeSpice(circuit, opt = {}) {
     switch (e.type) {
       case 'R': case 'C': case 'L': lines.push(`${nm} ${n[0]} ${n[1]} ${spiceNum(e.value)}${e.ic != null && e.type !== 'R' ? ` IC=${spiceNum(e.ic)}` : ''}`); break;
       case 'V': case 'I': lines.push(`${nm} ${n[0]} ${n[1]} ${srcText(e)}`); break;
+      case 'K': lines.push(`${nm} ${e.l.map((x) => spiceName('L', x)).join(' ')} ${spiceNum(e.k)}`); break;
       case 'E': lines.push(`${nm} ${n.join(' ')} ${spiceNum(e.gain)}`); break;
       case 'G': lines.push(`${nm} ${n.join(' ')} ${spiceNum(e.gm)}`); break;
       case 'D': lines.push(`${nm} ${n[0]} ${n[1]} ${mkey('DMOD', { t: 'D', ...e.model })}`); break;

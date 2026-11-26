@@ -66,7 +66,7 @@ export function createSimView(ctx) {
   // ---------------- 設定の画面 ----------------
   function analysisForm(s) {
     const a = s.analysis, f = (k, sub, label, ph = '') => `<label class="field small"><span>${label}</span><input type="text" data-an="${k}.${sub}" value="${esc(a[k][sub] ?? '')}" placeholder="${ph}"></label>`;
-    const srcOpts = (sel) => `<option value="">（選ぶ）</option>${s.sources.map((x) => `<option ${x.name === sel ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}`;
+    const srcOpts = (sel) => `<option value="">（選ぶ）</option>${[...schSources().map((x) => x.ref), ...s.sources.map((x) => x.name)].map((n) => `<option ${n === sel ? 'selected' : ''}>${esc(n)}</option>`).join('')}`;
     if (a.type === 'op') return '<p class="note">直流の動作点（各ネットの電圧・部品の電流と消費電力）を求めます。コンデンサは開放、インダクタは短絡として計算します。</p>';
     if (a.type === 'dc') return `<div class="form-row"><label class="field small"><span>信号源</span><select data-an="dc.src">${srcOpts(a.dc.src)}</select></label>${f('dc', 'start', '開始', '0')}${f('dc', 'stop', '終了', '5')}${f('dc', 'step', '刻み', '0.05')}</div>
       <div class="form-row"><label class="field small"><span>2 つ目（任意）</span><select data-an="dc.src2">${srcOpts(a.dc.src2)}</select></label>${f('dc', 'start2', '開始')}${f('dc', 'stop2', '終了')}${f('dc', 'step2', '刻み')}</div>`;
@@ -76,9 +76,14 @@ export function createSimView(ctx) {
       <label class="field check"><input type="checkbox" data-an="tran.uic" ${a.tran.uic ? 'checked' : ''}> 動作点を求めずに 0V から始める（UIC。コンデンサの初期電圧はモデルの設定で）</label>`;
   }
 
+  /** 回路図に置いた信号源（交流電源・直流電源・電流源） */
+  const schSources = () => { try { return ctx.getNetlist()?.simSources || []; } catch { return []; } };
+
   function sourcesHtml(s) {
-    if (!s.sources.length) return '<p class="note">信号源がありません。「＋ 信号源」で、ネットとネット（ふつうは GND）の間に電圧源・電流源を置きます。回路図の電池は自動で電圧源になります。</p>';
-    return `<ul class="sim-list">${s.sources.map((x, i) => `<li><button type="button" class="link" data-src="${i}"><b>${esc(x.name)}</b> ${x.type === 'I' ? '電流源' : '電圧源'} ${esc(x.pos)} → ${esc(x.neg)}・DC ${esc(x.dc || '0')}${x.acMag ? `・AC ${esc(x.acMag)}` : ''}${x.wave?.type && x.wave.type !== 'none' ? `・${x.wave.type.toUpperCase()}(${esc((x.wave.p || []).join(' '))})` : ''}</button></li>`).join('')}</ul>`;
+    const sch = schSources();
+    const schHtml = sch.length ? `<p class="note">回路図の信号源（値は回路図の「属性」で変えます）</p><ul class="sim-list">${sch.map((x) => `<li><b>${esc(x.ref)}</b> ${x.kind === 'isrc' ? '電流源' : '電圧源'} ${esc(x.pins[0]?.net || '未接続')} → ${esc(x.pins[1]?.net || '未接続')}・${esc(x.value)}</li>`).join('')}</ul>` : '';
+    if (!s.sources.length) return schHtml + `<p class="note">${sch.length ? 'ここで足す信号源はありません。' : '信号源がありません。回路図に「交流電源」「直流電源」を置くか、'}「＋ 信号源」で、ネットとネット（ふつうは GND）の間に電圧源・電流源を置きます。回路図の電池は自動で電圧源になります。</p>`;
+    return schHtml + `<ul class="sim-list">${s.sources.map((x, i) => `<li><button type="button" class="link" data-src="${i}"><b>${esc(x.name)}</b> ${x.type === 'I' ? '電流源' : '電圧源'} ${esc(x.pos)} → ${esc(x.neg)}・DC ${esc(x.dc || '0')}${x.acMag ? `・AC ${esc(x.acMag)}` : ''}${x.wave?.type && x.wave.type !== 'none' ? `・${x.wave.type.toUpperCase()}(${esc((x.wave.p || []).join(' '))})` : ''}</button></li>`).join('')}</ul>`;
   }
 
   function modelsHtml() {
@@ -235,7 +240,7 @@ export function createSimView(ctx) {
       <div class="sim-an">${analysisForm(s)}</div>
       <div class="sim-actions"><button type="button" class="btn primary" data-act="run">${st.running ? '中止' : '▶ 実行'}</button><button type="button" class="btn" data-act="addsrc">＋ 信号源</button><button type="button" class="btn" data-act="spice">SPICE 書出</button></div>
       <div class="sim-result">${resultHtml()}</div>
-      <details class="sim-sec"${s.sources.length ? '' : ' open'}><summary>信号源（${s.sources.length}）${s.sources.length ? `<span class="muted sum-note">${esc(s.sources.map((x) => x.name).join('・'))}</span>` : ''}</summary>${sourcesHtml(s)}</details>
+      <details class="sim-sec"${s.sources.length || schSources().length ? '' : ' open'}><summary>信号源（${s.sources.length + schSources().length}）${s.sources.length + schSources().length ? `<span class="muted sum-note">${esc([...schSources().map((x) => x.ref), ...s.sources.map((x) => x.name)].join('・'))}</span>` : ''}</summary>${sourcesHtml(s)}</details>
       <details class="sim-sec"><summary>部品のモデル</summary><p class="note">回路図の部品を値・型番からモデルにします。部品をタップすると、内蔵モデルの選択・SPICE モデルの割り当て・計算から外す、を選べます。IC・コネクタはモデルを割り当てたときだけ計算に入ります。</p>${modelsHtml()}</details>
       <details class="sim-sec"><summary>ライブラリ（SPICE の .model・.subckt）</summary><p class="note">メーカーの SPICE モデルを貼ります（ダイオード・バイポーラ・MOSFET レベル 1 の .model と、R C L V I E G D Q M X だけでできた .subckt）。部品のモデルで「SPICE」を選び、名前を入れると使えます。</p><textarea class="sim-lib" rows="6" spellcheck="false" placeholder=".model D1N4148 D(IS=2.52n N=1.752 RS=0.568)">${esc(s.lib)}</textarea><button type="button" class="btn small" data-act="savelib">ライブラリを保存</button></details>
       <p class="note">計算は端末の中だけで行います（SPICE と同じ修正節点解析・ニュートン法・台形則）。モデルは近似なので、実機・データシートで確かめてください。</p>
@@ -280,11 +285,15 @@ export function createSimView(ctx) {
     const choices = builtinChoices(c.kind);
     const mode = set.mode || 'auto';
     const prm = set.params || {};
+    const fld = (name, label, val) => `<label class="field small"><span>${label}</span><input type="text" name="${name}" value="${esc(val)}"></label>`;
     const extra = c.kind === 'pot' ? `<label class="field small"><span>ワイパーの位置（0〜1）</span><input type="text" name="pos" value="${esc(prm.pos ?? '0.5')}"></label>`
       : c.kind === 'capacitor' || c.kind === 'electrolytic' ? `<label class="field small"><span>初期電圧（UIC のとき。空 = 0）</span><input type="text" name="ic" value="${esc(prm.ic ?? '')}"></label>`
         : c.kind === 'inductor' ? `<label class="field small"><span>直列抵抗 Ω（DCR）</span><input type="text" name="rs" value="${esc(prm.rs ?? '')}"></label>`
           : c.kind === 'battery' ? `<label class="field small"><span>内部抵抗 Ω</span><input type="text" name="rint" value="${esc(prm.rint ?? '0.1')}"></label>`
-            : c.kind === 'switch' ? `<label class="field small"><span>状態</span><select name="state"><option value="open" ${prm.state !== 'closed' ? 'selected' : ''}>開</option><option value="closed" ${prm.state === 'closed' ? 'selected' : ''}>閉</option></select></label>` : '';
+            : c.kind === 'switch' ? `<label class="field small"><span>状態</span><select name="state"><option value="open" ${prm.state !== 'closed' ? 'selected' : ''}>開</option><option value="closed" ${prm.state === 'closed' ? 'selected' : ''}>閉</option></select></label>`
+              : c.kind === 'transformer' ? `<p class="note">巻数比は回路図の値（例: 100V:12V）。点は 1 と 4。</p><div class="form-row">${fld('lp', '1 次のインダクタンス H', prm.lp ?? '10')}${fld('k', '結合係数（0〜1）', prm.k ?? '0.999')}</div><div class="form-row">${fld('rp', '1 次の巻線抵抗 Ω', prm.rp ?? '1')}${fld('rs', '2 次の巻線抵抗 Ω', prm.rs ?? '0.1')}</div>`
+                : c.kind === 'fuse' || c.kind === 'ferrite' ? fld('r', '抵抗 Ω（直流）', prm.r ?? '0.05')
+                  : c.kind === 'tvs' ? fld('bv', '降伏電圧 V（空 = 型番から）', prm.bv ?? '') : '';
     const pins = defaultPins(c.kind, c).join(' ');
     const html = `<div class="form">
       <p class="note">${esc(c.ref)}・${esc(c.kind)}・値 ${esc(c.value)}${c.mpn ? `・${esc(c.mpn)}` : ''}</p>
@@ -307,7 +316,11 @@ export function createSimView(ctx) {
     if (q('spice')) out.spice = q('spice');
     if (q('pins')) out.pins = q('pins');
     const p2 = {};
-    for (const k of ['pos', 'ic', 'rs', 'rint', 'state']) if (q(k)) p2[k] = q(k);
+    for (const k of ['pos', 'ic', 'rs', 'rint', 'state', 'lp', 'k', 'rp', 'r', 'bv']) {
+      if (!q(k)) continue;
+      if (k !== 'state' && !Number.isFinite(parseValue(q(k)))) { ctx.toast(`「${q(k)}」を数として読めません`, true); return; }
+      p2[k] = q(k);
+    }
     if (Object.keys(p2).length) out.params = p2;
     save((sim) => { if (out.mode === 'auto' && Object.keys(out).length === 1) delete sim.models[compId]; else sim.models[compId] = out; });
     render();

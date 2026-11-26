@@ -13,7 +13,7 @@
 import { generateNetlist } from '../netlist/netlist.js';
 import { parseValue, spiceNum } from './units.js';
 import { builtinFor, lookup, DIODES, BJTS, MOSFETS, OPAMPS } from './models.js';
-import { parseSpice, flatten, writeSpice, SpiceError } from './spice.js';
+import { parseSpice, flatten, writeSpice, SpiceError, parseElementLine } from './spice.js';
 import { freqList, sweepList, SimError } from './engine.js';
 
 export const SIM_KINDS = ['resistor', 'pot', 'capacitor', 'electrolytic', 'inductor', 'diode', 'led', 'zener', 'npn', 'pnp', 'nmos', 'pmos', 'opamp', 'switch', 'battery'];
@@ -59,7 +59,7 @@ const nodeOf = (net) => (net === GROUND ? '0' : net);
 /** 部品ごとの既定のピンの順番（SPICE の端子の順。ic・connector はサブ回路の端子の順） */
 export function defaultPins(kind, comp) {
   switch (kind) {
-    case 'diode': case 'led': case 'zener': return ['2', '1']; // A, K
+    case 'diode': case 'led': case 'zener': case 'schottky': return ['2', '1']; // A, K
     case 'npn': case 'pnp': return ['3', '1', '2']; // C, B, E
     case 'nmos': case 'pmos': return ['3', '1', '2']; // D, G, S
     case 'opamp': return ['3', '2', '1', '8', '4']; // +, −, OUT, V+, V−
@@ -123,8 +123,9 @@ export function buildCircuit(project, opt = {}) {
         }
         case 'pot': {
           const R = val(v, '抵抗値', c.ref), pos = Math.min(1, Math.max(0, Number(prm.pos ?? 0.5)));
-          elements.push({ type: 'R', name: `${c.ref}_A`, n: [node(1), node(3)], value: Math.max(1e-3, R * pos) });
-          elements.push({ type: 'R', name: `${c.ref}_B`, n: [node(3), node(2)], value: Math.max(1e-3, R * (1 - pos)) });
+          // 1・3 = 両端, 2 = ワイパ
+          elements.push({ type: 'R', name: `${c.ref}_A`, n: [node(1), node(2)], value: Math.max(1e-3, R * pos) });
+          elements.push({ type: 'R', name: `${c.ref}_B`, n: [node(2), node(3)], value: Math.max(1e-3, R * (1 - pos)) });
           row.model = `可変抵抗 ${v}・位置 ${Math.round(pos * 100)}%`;
           break;
         }
@@ -150,6 +151,62 @@ export function buildCircuit(project, opt = {}) {
           row.model = b.label; if (b.guessed) row.note = '型番が内蔵モデルに無いため一般のモデル';
           break;
         }
+        case 'schottky': {
+          const b = mode === 'builtin' && set.key ? { key: set.key, ...lookup(DIODES, set.key) } : builtinFor('schottky', c.value, c.mpn);
+          elements.push({ type: 'D', name: c.ref, n: [node(2), node(1)], model: { ...b.m } });
+          row.model = b.label; if (b.guessed) row.note = '型番が内蔵モデルに無いため一般のショットキーのモデル';
+          break;
+        }
+        case 'tvs': {
+          // 双方向: カソードどうしを向かい合わせた 2 つのツェナー。降伏電圧は型番の「5.0CA」の 5.0（逆耐圧）×1.25 で近似
+          const vwm = Number(String(c.mpn || c.value).match(/(\d+(?:\.\d+)?)C?A\b/i)?.[1]);
+          const bv = prm.bv ? val(prm.bv, '降伏電圧', c.ref) : Number.isFinite(vwm) ? vwm * 1.25 : 6.4;
+          const m = { IS: 1e-12, N: 1, RS: 0.1, BV: bv, IBV: 1e-3, NBV: 1.2, CJO: 300e-12 };
+          const mid = `${c.ref}#m`;
+          elements.push({ type: 'D', name: `${c.ref}_A`, n: [node(1), mid], model: m }, { type: 'D', name: `${c.ref}_B`, n: [node(2), mid], model: { ...m } });
+          row.model = `双方向 TVS（降伏 約 ${spiceNum(bv)}V・近似）`;
+          break;
+        }
+        case 'bridge': {
+          // 1・2 = ~（交流）, 3 = +, 4 = −。ダイオード 4 本
+          const b = mode === 'builtin' && set.key ? { key: set.key, ...lookup(DIODES, set.key) } : builtinFor('bridge', c.value, c.mpn);
+          const [a1, a2, pos, neg] = [node(1), node(2), node(3), node(4)];
+          elements.push(
+            { type: 'D', name: `${c.ref}_1`, n: [a1, pos], model: { ...b.m } }, { type: 'D', name: `${c.ref}_2`, n: [a2, pos], model: { ...b.m } },
+            { type: 'D', name: `${c.ref}_3`, n: [neg, a1], model: { ...b.m } }, { type: 'D', name: `${c.ref}_4`, n: [neg, a2], model: { ...b.m } });
+          row.model = `ブリッジ（${b.label} ×4）`;
+          break;
+        }
+        case 'transformer': {
+          // 値「100V:12V」「10:1」= 1 次:2 次 の巻数比。1 次のインダクタンス・結合係数・巻線抵抗は属性で変えられる
+          const m = String(v).replace(/\s/g, '').match(/^([^:]+):([^:]+)$/);
+          if (!m) throw new SimError(`巻数比が読めません: ${v}（「100V:12V」「10:1」の形）`);
+          const a = val(m[1].replace(/V$/i, ''), '1 次', c.ref), b2 = val(m[2].replace(/V$/i, ''), '2 次', c.ref);
+          if (!(a > 0 && b2 > 0)) throw new SimError(`巻数比は 0 より大きくしてください: ${v}`);
+          const n2 = b2 / a, lp = prm.lp ? val(prm.lp, '1 次のインダクタンス', c.ref) : 10, k = prm.k ? val(prm.k, '結合係数', c.ref) : 0.999;
+          const rp = prm.rp ? val(prm.rp, '1 次の巻線抵抗', c.ref) : 1, rs = prm.rs ? val(prm.rs, '2 次の巻線抵抗', c.ref) : 0.1;
+          const mp = `${c.ref}#p`, ms = `${c.ref}#s`;
+          // 点は 1 と 4: 1→2 と 4→3 が同じ向き
+          elements.push({ type: 'R', name: `${c.ref}_RP`, n: [node(1), mp], value: rp }, { type: 'L', name: `${c.ref}_LP`, n: [mp, node(2)], value: lp },
+            { type: 'R', name: `${c.ref}_RS`, n: [node(4), ms], value: rs }, { type: 'L', name: `${c.ref}_LS`, n: [ms, node(3)], value: lp * n2 * n2 },
+            { type: 'K', name: `K${c.ref}`, n: [], l: [`${c.ref}_LP`, `${c.ref}_LS`], k });
+          row.model = `トランス 1:${Number(n2.toPrecision(4))}・1 次 ${spiceNum(lp)}H・結合 ${k}・巻線 ${spiceNum(rp)}Ω / ${spiceNum(rs)}Ω`;
+          break;
+        }
+        case 'fuse': case 'ferrite': {
+          const r = prm.r ? val(prm.r, '抵抗', c.ref) : 0.05;
+          elements.push({ type: 'R', name: c.ref, n: [node(1), node(2)], value: r });
+          row.model = `抵抗 ${spiceNum(r)}Ω`;
+          row.note = c.kind === 'fuse' ? '切れる動作はありません' : '直流抵抗だけ（周波数特性はありません）';
+          break;
+        }
+        case 'thermistor': case 'speaker': {
+          elements.push({ type: 'R', name: c.ref, n: [node(1), node(2)], value: val(c.kind === 'speaker' ? v.replace(/Ω|ohm/gi, '') : v, '抵抗値', c.ref) });
+          row.model = `抵抗 ${v}`;
+          row.note = c.kind === 'thermistor' ? '25°C の値（温度の変化はありません）' : 'インピーダンスを抵抗として（インダクタンスはありません）';
+          break;
+        }
+        case 'testpoint': row.status = 'off'; row.note = '計算に関係しません'; break;
         case 'npn': case 'pnp': {
           const b = mode === 'builtin' && set.key ? { key: set.key, ...lookup(BJTS, set.key) } : builtinFor(c.kind, c.value, c.mpn);
           elements.push({ type: 'Q', name: c.ref, n: [node(3), node(1), node(2)], model: { ...b.m } });
@@ -186,7 +243,7 @@ export function buildCircuit(project, opt = {}) {
         }
         default:
           row.status = 'off';
-          row.note = c.kind === 'ic' || c.kind === 'connector' ? 'モデルなし（SPICE のサブ回路を割り当てると計算に入ります）。ピンは何もつながっていない扱い' : 'モデルなし';
+          row.note = ['ic', 'connector', 'regulator', 'optocoupler', 'relay', 'crystal'].includes(c.kind) ? 'モデルなし（SPICE のサブ回路を割り当てると計算に入ります）。ピンは何もつながっていない扱い' : 'モデルなし';
       }
     } catch (e) {
       if (!(e instanceof SimError || e instanceof SpiceError)) throw e;
@@ -194,9 +251,31 @@ export function buildCircuit(project, opt = {}) {
       warnings.push(`${c.ref}: ${e.message}`);
     }
   }
-  // 信号源
-  const netNames = new Set(nl.nets.map((n) => n.name));
+  // 回路図に置いた信号源（交流・直流・電流源。値は SPICE の書き方）
   const srcNames = new Set();
+  for (const c of nl.simSources || []) {
+    const row = { ref: c.ref, compId: c.compId, kind: c.kind, value: c.value, status: 'on', model: '', note: '' };
+    rows.push(row);
+    const set = s.models[c.compId] || {};
+    if (set.mode === 'off') { row.status = 'off'; row.note = 'シミュレーションから外す'; continue; }
+    try {
+      const pn = new Map(c.pins.map((p) => [p.num, p.net]));
+      const nd = (num) => { const n = pn.get(num); if (n) { usedNets.add(n); return nodeOf(n); } return `${c.ref}#${num}`; };
+      const type = c.kind === 'isrc' ? 'I' : 'V';
+      let e;
+      try { e = parseElementLine(`${type}${c.ref} a b ${String(c.value || '').trim() || 'DC 0'}`); } catch (err) { throw new SimError(`値が読めません（SPICE の書き方: DC 5 / AC 1 / SIN(0 1 1k)）: ${err.message}`); }
+      if (!Number.isFinite(e.dc) || (e.wave && e.wave.p.some((x) => !Number.isFinite(x)))) throw new SimError(`値が読めません: ${c.value}`);
+      elements.push({ ...e, name: c.ref, n: [nd('1'), nd('2')] });
+      srcNames.add(c.ref.toUpperCase());
+      row.model = `${type === 'I' ? '電流源' : '電圧源'} ${c.value}`;
+    } catch (e) {
+      if (!(e instanceof SimError || e instanceof SpiceError)) throw e;
+      row.status = 'error'; row.note = e.message;
+      warnings.push(`${c.ref}: ${e.message}`);
+    }
+  }
+  // 信号源（シミュの画面で足したもの）
+  const netNames = new Set(nl.nets.map((n) => n.name));
   for (const src of s.sources) {
     const name = String(src.name || '').trim() || `${src.type}${s.sources.indexOf(src) + 1}`;
     if (srcNames.has(name.toUpperCase())) throw new SimError(`信号源の名前 ${name} が重なっています`);
@@ -210,13 +289,43 @@ export function buildCircuit(project, opt = {}) {
     usedNets.add(src.pos); usedNets.add(src.neg);
   }
   if (!elements.length) throw new SimError('計算に入る部品がありません');
+  const noGnd = !elements.some((e) => e.n.includes('0'));
+  if (noGnd) warnings.push('GND（0V の基準）につながる素子がありません。GND という名前のネットを置いてください（いまは回路の 1 点を 1kΩ で基準に結んで計算します）');
+  tieIsolated(elements, noGnd ? [] : warnings);
   const nodes = ['0'];
   const seen = new Set(['0']);
   for (const e of elements) for (const n of e.n) if (!seen.has(n)) { seen.add(n); nodes.push(n); }
-  if (!elements.some((e) => e.n.includes('0'))) warnings.push('GND（0V の基準）につながる素子がありません。GND という名前のネットを基準にします');
-  const off = rows.filter((r) => r.status === 'off' && r.kind !== 'power' && r.kind !== 'gnd').map((r) => r.ref);
+  const off = rows.filter((r) => r.status === 'off' && r.kind !== 'power' && r.kind !== 'gnd' && r.kind !== 'testpoint').map((r) => r.ref);
   if (off.length) warnings.push(`計算に入れない部品（${off.length}）: ${off.slice(0, 12).join(', ')}${off.length > 12 ? ' …' : ''}`);
   return { circuit: { nodes, elements }, rows, warnings, lib };
+}
+
+/**
+ * GND と何の素子でもつながっていない部分（トランスの 2 次側のように磁気だけで結合した所）を、1kΩ で GND に結ぶ。
+ * つながりが無いので電流は流れず、計算の結果は変わらない。結ばないと電位が決まらず、計算が進まない（ngspice は singular matrix）。
+ * 容量だけでつながった所は結ばない（交流が流れるので結果が変わる）
+ */
+export function tieIsolated(elements, warnings = []) {
+  const parent = new Map();
+  const find = (a) => { let r = a; while (parent.get(r) !== r) r = parent.get(r); while (parent.get(a) !== r) { const nx = parent.get(a); parent.set(a, r); a = nx; } return r; };
+  const add = (a) => { if (!parent.has(a)) parent.set(a, a); };
+  const union = (a, b) => { add(a); add(b); const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+  add('0');
+  for (const e of elements) {
+    if (e.type === 'K' || !e.n.length) continue;
+    e.n.forEach(add);
+    for (let i = 1; i < e.n.length; i++) union(e.n[0], e.n[i]);
+    if (e.type === 'OA') union(e.n[0], '0'); // 出力は中で GND を基準にしている
+  }
+  const ground = find('0');
+  const groups = new Map();
+  for (const n of parent.keys()) { const r = find(n); if (r !== ground) { if (!groups.has(r)) groups.set(r, []); groups.get(r).push(n); } }
+  for (const nodes of groups.values()) {
+    const at = nodes.find((n) => !n.includes('#')) || nodes[0];
+    elements.push({ type: 'R', name: `RTIE_${at.replace(/[^A-Za-z0-9_]/g, '_')}`, n: [at, '0'], value: 1e3, internal: true });
+    warnings.push(`${at}${nodes.length > 1 ? ` など ${nodes.length} 個のノード` : ''} は GND とつながっていないので、1kΩ で GND に結びました（つながりが無いので電流は流れません）`);
+  }
+  return elements;
 }
 
 /** 解析の設定 → SPICE の解析の文 */

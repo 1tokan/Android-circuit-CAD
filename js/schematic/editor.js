@@ -2,7 +2,8 @@
 // データの変更は必ず ctx.edit(fn, label) を通す（履歴と自動保存に乗せるため）。
 
 import { snapPt } from './geom.js';
-import { KINDS, POWER_NETS, kindInfo, clampPinCount } from './symbols.js';
+import { KINDS, KIND_GROUPS, POWER_NETS, kindInfo, clampPinCount } from './symbols.js';
+import { missingGroups } from '../library/quickpick.js';
 import {
   addComponent, addWirePath, addLabel, routeL, hitTest, itemsInRect, snapTarget, isConnectable,
   moveSelection, rotateSelection, mirrorSelection, deleteSelection, describeSelection, findItem,
@@ -91,9 +92,14 @@ export function createSchematicEditor(ctx) {
         const n = st.sel.size;
         chips.push(`<span class="chip-info">${n === 1 && d.comps.length ? esc(d.comps[0].ref) : `${n}個選択`}</span>`);
         if (n === 1 && (d.comps.length || d.labels)) chips.push(chip('props', '属性'));
+        const one = n === 1 && d.comps.length === 1 ? d.comps[0] : null;
+        const oi = one ? kindInfo(one.kind) : null;
+        if (one && oi && !oi.power && !oi.virtual && ctx.pickLcsc) chips.push(chip('lcsc', one.props?.lcsc ? `品番 ${one.props.lcsc}` : '品番を探す', !one.props?.lcsc));
         chips.push(chip('rotate', '回転'), chip('mirror', 'ミラー'), chip('delete', '削除'), chip('clear', '解除'));
       } else {
         chips.push(chip('ai', 'Claude で作る', !sheet().components.length));
+        const miss = ctx.pickLcsc ? missingGroups(sheet()).reduce((a, g) => a + g.length, 0) : 0;
+        if (miss) chips.push(chip('lcscAll', `品番なし ${miss} 個`));
         chips.push('<span class="chip-info hint">タップで選択・長押し＋ドラッグで範囲選択</span>');
       }
     } else if (st.tool === 'place') {
@@ -116,6 +122,8 @@ export function createSchematicEditor(ctx) {
     switch (act) {
       case 'multi': st.multi = !st.multi; break;
       case 'props': await editProps(); break;
+      case 'lcsc': { const k = [...st.sel][0]; if (k?.startsWith('c:')) await ctx.pickLcsc([findItem(sheet(), k)]); break; }
+      case 'lcscAll': await ctx.pickAllMissing(); break;
       case 'rotate': case 'mirror': case 'delete': action(act); return;
       case 'clear': setSel(new Set()); break;
       case 'pick': openPicker(); break;
@@ -323,9 +331,18 @@ export function createSchematicEditor(ctx) {
     const pk = $('#picker');
     const grid = $('#picker-grid');
     if (!grid.childElementCount) {
-      grid.innerHTML = KINDS.filter((k) => !k.power).map((k) =>
-        `<button type="button" class="pick" data-kind="${k.kind}">${symbolPreviewSVG(k.kind, k.props)}<span>${esc(k.label)}</span></button>`).join('');
+      // 組ごと（受動部品・ダイオード・トランジスタと IC・電源と入出力・シミュ用）に並べる
+      grid.innerHTML = KIND_GROUPS.map((g) => `<div class="pick-group"><h3 class="pick-h">${esc(g.label)}</h3><div class="pick-cells">${g.kinds.map((kind) => {
+        const k = kindInfo(kind);
+        return `<button type="button" class="pick" data-kind="${k.kind}" data-words="${esc(`${k.label} ${k.kind} ${k.prefix} ${k.props?.value || ''}`.toLowerCase())}">${symbolPreviewSVG(k.kind, k.props)}<span>${esc(k.label)}</span></button>`;
+      }).join('')}</div></div>`).join('');
       grid.querySelectorAll('.pick').forEach(bindPickItem);
+      const q = $('#picker-q');
+      q?.addEventListener('input', () => {
+        const w = q.value.trim().toLowerCase().normalize('NFKC');
+        grid.querySelectorAll('.pick').forEach((b) => { b.hidden = !!w && !b.dataset.words.normalize('NFKC').includes(w); });
+        grid.querySelectorAll('.pick-group').forEach((g) => { g.hidden = !g.querySelector('.pick:not([hidden])'); });
+      });
     }
     grid.querySelectorAll('.pick').forEach((b) => b.classList.toggle('on', b.dataset.kind === st.placeKind));
     pk.hidden = false;
@@ -395,6 +412,11 @@ export function createSchematicEditor(ctx) {
     let html;
     if (info.power) {
       html = f('net', 'ネット名', c.props.net);
+    } else if (info.virtual) {
+      // シミュレーション用の信号源: 基板・BOM に載らないので、部品番号と値（SPICE の書き方）だけ
+      html = f('ref', '部品番号', c.ref, 'autocapitalize="characters"') +
+        f('value', '値（SPICE の書き方）', c.props.value, 'placeholder="例: DC 5 / SIN(0 141 50) AC 1 / PULSE(0 5 1m 1u 1u 5m 10m)"') +
+        '<p class="note">シミュレーション用の信号源です（基板・BOM・CPL には載りません）。SIN(オフセット 振幅 周波数)、AC 1 は AC 解析の大きさ。実効値 100V の交流は振幅 141V。</p>';
     } else {
       html = f('ref', '部品番号', c.ref, 'autocapitalize="characters"') + f('value', '値・型番', c.props.value) +
         f('footprint', 'フットプリント', c.props.footprint) + f('lcsc', 'LCSC品番', c.props.lcsc, 'placeholder="例: C17414"') +
@@ -410,10 +432,12 @@ export function createSchematicEditor(ctx) {
         : '<p class="note">部品データ未割り当て。「ライブラリから選ぶ」でLCSC品番・フットプリント・ピン対応をまとめて設定できます。</p>';
     }
     const r = await ctx.ui.ask(`${c.ref} の属性`, `<div class="form">${html}</div>`,
-      [{ label: 'キャンセル', value: '' }, ...(info.power ? [] : [{ label: 'ライブラリから選ぶ', value: 'lib' }]), ...(c.props.partId ? [{ label: '部品データを外す', value: 'unlink' }] : []), { label: '保存', value: 'ok', cls: 'primary' }]);
+      [{ label: 'キャンセル', value: '' }, ...(info.power || info.virtual ? [] : [...(ctx.pickLcsc ? [{ label: 'LCSC で探す', value: 'lcsc' }] : []), { label: 'ライブラリから選ぶ', value: 'lib' }]), ...(c.props.partId ? [{ label: '部品データを外す', value: 'unlink' }] : []), { label: '保存', value: 'ok', cls: 'primary' }]);
     if (r === 'lib') { ctx.openLibrary({ key: k, ref: c.ref }); return; }
     if (r === 'unlink') { edit((s) => { delete findItem(s, k).props.partId; }, '部品データを外す'); render(); return; }
-    if (r !== 'ok') return;
+    // 「LCSC で探す」は、入力した値を先に保存してから探す（値・足形を直してから探すことがある）
+    const wantLcsc = r === 'lcsc';
+    if (r !== 'ok' && !wantLcsc) return;
     const v = (n) => $(`#dialog-body [name="${n}"]`);
     if (info.power) {
       const net = v('net').value.trim();
@@ -430,6 +454,11 @@ export function createSchematicEditor(ctx) {
     const ref = v('ref').value.trim().toUpperCase();
     if (!/^[A-Z#]+\d+$/.test(ref)) { ctx.ui.toast('部品番号は「英字＋数字」で入力してください（例: R1）', true); return; }
     if (isRefTaken(sheet(), ref, c.id)) { ctx.ui.toast(`${ref} は既に使われています`, true); return; }
+    if (info.virtual) {
+      edit((s) => { const x = findItem(s, k); x.ref = ref; x.props.value = v('value').value.trim(); }, '属性');
+      render();
+      return;
+    }
     edit((s) => {
       const x = findItem(s, k);
       x.ref = ref;
@@ -443,6 +472,7 @@ export function createSchematicEditor(ctx) {
     }, '属性');
     if (c.props.lcsc && !/^C\d+$/.test(c.props.lcsc)) ctx.ui.toast('LCSC品番は「C＋数字」の形式です（例: C17414）', true);
     render();
+    if (wantLcsc) { await ctx.pickLcsc([findItem(sheet(), k)]); render(); }
   }
 
   function reannotate() {
@@ -499,6 +529,23 @@ export function createSchematicEditor(ctx) {
     render();
   }
 
+  /** 複数の部品に同じ部品データを割り当てる（元に戻すは 1 回で。LCSC 品番の近道から） */
+  function assignParts(keys, part) {
+    const live = keys.filter((k) => findItem(sheet(), k));
+    if (!live.length) return [];
+    edit((s) => {
+      for (const k of live) {
+        const x = findItem(s, k);
+        x.kind = part.kind;
+        Object.assign(x.props, ctx.partProps(part));
+        if (!part.symbol?.pinCount) { delete x.props.pinCount; delete x.props.pinNames; }
+      }
+    }, 'LCSC 品番の割り当て');
+    ctx.onPartUsed(part);
+    render();
+    return live;
+  }
+
   /** 回路図の部品にライブラリの部品データを割り当てる（シンボル種別が違えば種別も変える） */
   function assignPart(key, part) {
     const c = findItem(sheet(), key);
@@ -523,6 +570,7 @@ export function createSchematicEditor(ctx) {
     render,
     setPlacePart,
     assignPart,
+    assignParts,
     setTool,
     action,
     editProps,

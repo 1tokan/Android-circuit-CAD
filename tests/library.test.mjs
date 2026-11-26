@@ -162,7 +162,21 @@ test('種別・フットプリントの推定', () => {
   assert.equal(guessKind('Multilayer Ceramic Capacitors MLCC'), 'capacitor');
   assert.equal(guessKind('Aluminum Electrolytic Capacitors'), 'electrolytic');
   assert.equal(guessKind('Light Emitting Diodes (LED)'), 'led');
-  assert.equal(guessKind('Schottky Barrier Diodes'), 'diode');
+  assert.equal(guessKind('Schottky Barrier Diodes'), 'schottky');
+  // 0.13.3 で足した種別
+  assert.equal(guessKind('Bridge Rectifiers MBS-4'), 'bridge');
+  assert.equal(guessKind('Disposable fuses 500mA 1206 Fuses'), 'fuse');
+  assert.equal(guessKind('Ferrite Beads 600Ω@100MHz 0805'), 'ferrite');
+  assert.equal(guessKind('NTC Thermistors 10kΩ 0805'), 'thermistor');
+  assert.equal(guessKind('12MHz ±10ppm 20pF SMD3225-4P Crystals'), 'crystal');
+  assert.equal(guessKind('Power Relays SPDT 5V'), 'relay');
+  assert.equal(guessKind('Buzzers Magnetic 5V'), 'buzzer');
+  assert.equal(guessKind('Bidirectional TVS 5V SMB'), 'tvs');
+  assert.equal(guessKind('TVS 5V SMA Unidirectional'), 'diode'); // 片方向は極性があるのでダイオード（双方向の TVS 記号にしない）
+  assert.equal(guessFootprint('fuse', '1206'), 'Fuse_1206');
+  assert.equal(guessFootprint('bridge', 'MBS'), 'TO-269AA');
+  assert.equal(guessFootprint('optocoupler', 'DIP-4'), 'DIP-4');
+  assert.equal(guessFootprint('crystal', 'SMD3225-4P'), 'Crystal_SMD_3225-4Pin_3.2x2.5mm');
   assert.equal(guessKind('MOSFETs N-Channel'), 'nmos');
   assert.equal(guessKind('Linear Voltage Regulators (LDO)'), 'ic');
   assert.equal(guessFootprint('resistor', '0603'), 'R_0603');

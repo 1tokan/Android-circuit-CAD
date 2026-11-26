@@ -101,9 +101,10 @@
   <section class="picker" id="picker" hidden aria-label="部品一覧">
     <div class="picker-head">
       <h2>部品を選ぶ</h2>
-      <span class="hint">タップで選んで配置／キャンバスへドラッグ</span>
+      <input type="search" id="picker-q" placeholder="名前で探す（例: トランス）" aria-label="部品の名前で探す" autocomplete="off">
       <button class="icon-btn" id="picker-close" aria-label="閉じる">✕</button>
     </div>
+    <p class="hint picker-hint">タップで選んで配置／キャンバスへドラッグ。LCSC 品番は配置した部品を選んで「品番を探す」</p>
     <div class="picker-grid" id="picker-grid"></div>
   </section>
 

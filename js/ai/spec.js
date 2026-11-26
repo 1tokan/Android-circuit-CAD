@@ -28,6 +28,12 @@ export const PIN_RULES = {
   opamp: '1=OUT, 2=IN-, 3=IN+, 4=V-, 8=V+（SOIC-8 のデュアル品の A ユニット。B ユニット 5,6,7 は使わない）',
   pot: '1, 3=両端, 2=ワイパ', switch: '1, 2', battery: '1=+, 2=-',
   ic: 'pins で 1〜N を定義（N はパッド数。露出パッドも番号を付ける）', connector: 'pins で 1〜N を定義',
+  schottky: '1=K, 2=A', tvs: '1=A1, 2=A2（双方向）', bridge: '1=~, 2=~（交流）, 3=+, 4=-',
+  regulator: '1=GND, 2=VO(出力), 3=VI(入力)（AMS1117 の SOT-223 と同じ。78xx は部品データのピン対応で変える）',
+  transformer: '1・2=1 次, 4・3=2 次（点は 1 と 4。値は「100V:12V」のような巻数比）', fuse: '1, 2', ferrite: '1, 2', thermistor: '1, 2',
+  crystal: '1・3=水晶, 2・4=ケース（GND）', relay: '1=COM, 2・5=コイル, 3=NO, 4=NC', optocoupler: '1=A, 2=K（LED）, 3=E, 4=C（受光トランジスタ）',
+  buzzer: '1=+, 2=-', speaker: '1=+, 2=-', testpoint: '1',
+  vac: '1=+, 2=-（シミュレーション用・基板に載らない。値は SPICE の書き方 例: SIN(0 141 50) AC 1）', vdc: '1=+, 2=-（シミュレーション用。値 例: DC 5）', isrc: '1→2 の向きに部品の中を流れる（シミュレーション用。値 例: DC 1m）',
 };
 
 /** 構造化出力（Claude API の output_config.format）の JSON Schema */

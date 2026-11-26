@@ -60,6 +60,19 @@ oa.nodes = ['0', ...new Set(oa.elements.flatMap((e) => e.n).filter((n) => n !== 
 bad += await compare('オペアンプ（飽和あり）', oa, { ng: 'tran 0.5u 3m 0 0.5u', ours: (s) => s.tran(5e-6, 3e-3, { tmax: 0.5e-6 }) }, ['V(out)'], 3e-3);
 bad += await compare('オペアンプ', { ...oa, elements: oa.elements.map((e) => (e.name === 'VIN' ? { ...e, dc: 0.3, wave: undefined } : e)) }, { ac: true, ng: 'ac dec 10 10 10meg', ours: (s) => s.ac(freqList('dec', 10, 10, 1e7)) }, ['V(out)'], 1e-6);
 
+// 時定数が素子の容量だけで決まる回路（関係ない平滑の C がほかにある）: 刻みの誤差を容量の状態で見る変更の確かめ。
+// 既知の差: ゲート容量 約 3.5%・接合容量 約 0.6%（0.13.2 以前のエンジンでも 4.6%・0.6%。刻みを細かくしても変わらないので、
+// 容量のモデルの違い。許容をその分だけ広げ、悪くなったら気づけるようにしておく）
+bad += await compare('ゲート容量だけの時定数', C(`g\nVP in 0 PULSE(0 5 10u 10n 10n 40u 100u)\nRG in g 20k\nM1 d g 0 0 NAO\nRD vdd d 1k\nVDD vdd 0 5\nCB vdd 0 10u\n.model NAO NMOS(LEVEL=1 VTO=1.2 KP=10 LAMBDA=0.01 CGSO=600p CGDO=80p)\n.end`), { ng: 'tran 0.2u 200u 0 0.2u', ours: (s) => s.tran(0.2e-6, 200e-6) }, ['V(g)', 'V(d)'], 4e-2);
+bad += await compare('ダイオードの接合容量だけ', C(`j\nV1 in 0 SIN(0 1 1meg)\nR1 in a 10k\nD1 a 0 DJ\nC9 x 0 1u\nR9 x 0 1k\n.model DJ D(IS=1e-14 CJO=50p M=0.5 VJ=0.7)\n.end`), { ng: 'tran 5n 5u 0 5n', ours: (s) => s.tran(5e-9, 5e-6) }, ['V(a)'], 8e-3);
+
+// トランス（K の結合）: 100V 50Hz → 12V、ブリッジ整流・平滑
+const DR = '.model DRECT D(IS=1n N=1.8 RS=0.05 BV=1000 IBV=10u CJO=20p)';
+const tr = `t\nV1 ac 0 SIN(0 141 50) AC 1\nRP ac p 2\nLP p 0 10\nLS s1 s2 0.144\nRS s1 a 0.5\nKT LP LS 0.999\nRB s2 0 1meg\n`;
+bad += await compare('トランス', C(`${tr}RL a s2 100\n.end`), { ng: 'tran 50u 60m 0 50u', ours: (s) => s.tran(50e-6, 0.06, { tmax: 50e-6 }) }, ['V(a)'], 3e-3);
+bad += await compare('トランス', C(`${tr}RL a s2 100\n.end`), { ac: true, ng: 'ac dec 10 1 100k', ours: (s) => s.ac(freqList('dec', 10, 1, 1e5)) }, ['V(a)'], 1e-6);
+bad += await compare('トランス＋ブリッジ整流＋平滑', C(`${tr}D1 a pos DRECT\nD2 s2 pos DRECT\nD3 neg a DRECT\nD4 neg s2 DRECT\nRG neg 0 1m\nC1 pos neg 1000u\nRL pos neg 100\n${DR}\n.end`), { ng: 'tran 50u 100m 0 50u', ours: (s) => s.tran(50e-6, 0.1, { tmax: 50e-6 }) }, ['V(pos)'], 3e-3);
+
 // 同梱サンプル: 電源の入口（Q1）を、回路図から作った回路で
 const src = process.argv[2] || new URL('../../samples/usb-dac-amp.json', import.meta.url);
 const prj = JSON.parse(fs.readFileSync(src, 'utf8'));

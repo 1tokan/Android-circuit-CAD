@@ -6,7 +6,7 @@ export const MODULES = [
   { id: 'project',   name: 'プロジェクト管理・保存', stage: 1, status: 'ready' },
   { id: 'schematic', name: '回路図エディタ',         stage: 2, status: 'ready' },
   { id: 'library',   name: '電子部品ライブラリ',     stage: 3, status: 'ready' },
-  { id: 'lcsc',      name: 'LCSC部品検索・管理',     stage: 3, status: 'ready', note: '公式APIは非使用（CSV/JSON取込・手動登録・LCSCリンク）' },
+  { id: 'lcsc',      name: 'LCSC部品検索・管理',     stage: 3, status: 'ready', note: '公式APIは非使用（CSV/JSON取込・手動登録・LCSCリンク）。非公式の jlcsearch で検索し、回路図の部品から 3 手で品番を割り当てる近道・品番なしをまとめて割り当てる機能あり（価格・在庫は検索時点）' },
   { id: 'netlist',   name: 'ネットリスト生成',       stage: 3, status: 'ready' },
   { id: 'pcb',       name: 'PCBレイアウトエディタ',  stage: 4, status: 'ready', note: '自動配線（グリッド A*・引き直し）・3D 表示（簡易形状）あり' },
   { id: 'erc',       name: 'ERC（電気的ルール）',    stage: 5, status: 'ready', note: '1シートのみ。汎用ICのピン属性は「双方向」扱い（検査結果に未検査項目を表示）' },
@@ -14,7 +14,7 @@ export const MODULES = [
   { id: 'signal',    name: '信号経路（USB・I2S・アナログ音声）', stage: 5, status: 'ready', note: 'つながり・左右・極性・役割は汎用。設定ピン・レベル・入力インピーダンスは登録した部品（PCM5102A・TPA6132A2・MAX98357A・USBLC6）のみ。ファームウェアは対象外' },
   { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'ready', note: 'RS-274X X2・Excellon・ZIP。ベタの塗りつぶし（クリアランス・サーマル・島除去）を含む' },
   { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'ready', note: 'JLCPCB形式。回転はパッケージ補正表＋部品ごとの手動補正（プレビューで要確認）' },
-  { id: 'sim',       name: '回路シミュレーション（SPICE 相当）', stage: 13, status: 'partial', note: '動作点・直流スイープ（2 重まで）・AC・過渡、FFT・カーソル・測定・チューニング、SPICE（ngspice）ネットリスト書き出し、.model と R C L V I E G D Q M X の .subckt の読込。モデル: ダイオード・バイポーラ（Gummel-Poon の基本）・MOSFET レベル 1・オペアンプ（飽和つき）。未実装: 雑音解析・極零・伝達関数・感度、B 素子（式）・JFET・スイッチ素子・.param・.lib・BSIM などの高度な MOSFET モデル、温度の変更' },
+  { id: 'sim',       name: '回路シミュレーション（SPICE 相当）', stage: 13, status: 'partial', note: '動作点・直流スイープ（2 重まで）・AC・過渡、FFT・カーソル・測定・チューニング、SPICE（ngspice）ネットリスト書き出し、.model と R C L K V I E G D Q M X の .subckt の読込。回路図の交流・直流・電流源（基板に載らない）、トランス（結合係数つき）、ブリッジ・ショットキー・双方向 TVS。モデル: ダイオード・バイポーラ（Gummel-Poon の基本）・MOSFET レベル 1・オペアンプ（飽和つき）。レギュレータ・フォトカプラ・リレー・水晶はモデルなし（SPICE のサブ回路を割り当てれば計算に入る）。拡散容量（TT）は容量で近似するので、大きな TT は刻みが細かくなる。素子の容量だけで時定数が決まる回路は ngspice と数 % 差がある（容量モデルの違い）。未実装: 雑音解析・極零・伝達関数・感度、B 素子（式）・JFET・スイッチ素子・.param・.lib・BSIM などの高度な MOSFET モデル、温度の変更' },
   { id: 'kicad',     name: 'KiCad 書き出し',   stage: 7, status: 'ready', note: 'プロジェクト一式（.kicad_pcb・.kicad_sch・シンボル・フットプリント・簡易 3D・設計ルール）。KiCad 7.0.11 で読み込み・照合を確認。3D は簡易形状' },
 ];
 

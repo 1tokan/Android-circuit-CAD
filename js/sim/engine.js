@@ -271,6 +271,17 @@ export class Simulator {
     this.size = k;
     // 素子名 → 素子
     this.byName = new Map(this.elements.map((e) => [e.name, e]));
+    // 結合（K）: 名前でインダクタを探し、相互インダクタンス M = k√(L1 L2)
+    this.couplings = [];
+    for (const e of this.elements) {
+      if (e.type !== 'K') continue;
+      const find = (nm) => this.elements.find((x) => x.type === 'L' && x.name.toLowerCase() === String(nm).toLowerCase());
+      const la = find(e.l?.[0]), lb = find(e.l?.[1]);
+      if (!la || !lb) throw new SimError(`${e.name}: 結合するインダクタ ${!la ? e.l?.[0] : e.l?.[1]} がありません`);
+      if (la === lb) throw new SimError(`${e.name}: 同じインダクタどうしは結合できません`);
+      if (!(e.k > 0 && e.k <= 1)) throw new SimError(`${e.name}: 結合係数は 0 より大きく 1 以下にしてください（${e.k}）`);
+      this.couplings.push({ name: e.name, a: la, b: lb, M: e.k * Math.sqrt(la.value * lb.value) });
+    }
     if (!this.nn) throw new SimError('ノードがありません（GND のほかにノードが要ります）');
   }
 
@@ -486,7 +497,18 @@ export class Simulator {
           st.devNew.set(e.name, { f, u });
           break;
         }
+        case 'K': break; // 結合は下でまとめて（インダクタの行の b は上で = で入れるので、その後に足す）
         default: throw new SimError(`扱えない素子: ${e.type}（${e.name}）`);
+      }
+    }
+    // 結合したインダクタ（トランス）: v1 = L1 di1/dt + M di2/dt。台形則なら係数 2M/h、後退オイラーなら M/h
+    if (tran) {
+      for (const cp of this.couplings) {
+        const req = trap ? (2 * cp.M) / h : cp.M / h;
+        const ra = cp.a.br, rb = cp.b.br;
+        const ia = (st.inds.get(cp.a.name) || { i: 0 }).i, ib = (st.inds.get(cp.b.name) || { i: 0 }).i;
+        A[ra * N + rb] -= req; b[ra] -= req * ib;
+        A[rb * N + ra] -= req; b[rb] -= req * ia;
       }
     }
     return { A, b };
@@ -662,6 +684,7 @@ export class Simulator {
       const d = st.dev.get(e.name);
       if (e.type === 'C') capC(n[0], n[1], e.value);
       if (e.type === 'L') Cm[e.br * N + e.br] -= e.value;
+      if (e.type === 'K') { const cp = this.couplings.find((x) => x.name === e.name); Cm[cp.a.br * N + cp.b.br] -= cp.M; Cm[cp.b.br * N + cp.a.br] -= cp.M; }
       if (e.type === 'D') capC(e.inner || n[0], n[1], this.diodeCap(d.vd, d.gd, e.model));
       if (e.type === 'Q') { const c = this.bjtCaps(d.vbe, d.vbc, d.gm, e.model); capC(n[1], n[2], c.cbe); capC(n[1], n[0], c.cbc); }
       if (e.type === 'M') { capC(n[1], n[2], e.model.CGSO ? e.model.CGSO * (e.W ?? 1) : 0); capC(n[1], n[0], e.model.CGDO ? e.model.CGDO * (e.W ?? 1) : 0); }
@@ -759,6 +782,17 @@ export class Simulator {
     let t = 0;
     let h = Math.min(tmax, tstop / 1000, ...(bps.length ? [bps[0] / 2] : []), tstep > 0 ? tstep / 4 : Infinity);
     const hmin = Math.max(tstop * 1e-12, 1e-18);
+    // 刻みの誤差を見る状態: 容量（C 素子・オペアンプの中の容量）の両端と、インダクタの電流
+    const lteCaps = [], lteInds = [];
+    for (const e of this.elements) {
+      if (e.type === 'C') lteCaps.push([e.ni[0], e.ni[1]]);
+      if (e.type === 'OA') lteCaps.push([e.inner, 0]);
+      // 素子の容量（接合・ゲート）も状態（時定数がそれだけで決まる回路がある）
+      if (e.type === 'D' && !e.internal && (e.model.CJO || e.model.TT)) lteCaps.push([e.inner || e.ni[0], e.ni[1]]);
+      if (e.type === 'Q' && (e.model.CJE || e.model.CJC || e.model.TF)) lteCaps.push([e.ni[1], e.ni[2]], [e.ni[1], e.ni[0]]);
+      if (e.type === 'M' && (e.model.CGSO || e.model.CGDO)) lteCaps.push([e.ni[1], e.ni[2]], [e.ni[1], e.ni[0]]);
+      if (e.type === 'L') lteInds.push(e.br);
+    }
     let first = true; // 角の直後は後退オイラー（台形則の振動を抑える）
     let xPrev = Float64Array.from(x), tPrev = 0;
     const maxPts = opt.maxPoints || 200000;
@@ -775,10 +809,20 @@ export class Simulator {
       let accept = !!r, err = 0;
       if (r && !first && t > tPrev) {
         const k = hh / (t - tPrev);
-        for (let i = 0; i < this.nn; i++) {
-          const pred = x[i] + (x[i] - xPrev[i]) * k;
-          const e = Math.abs(r.x[i] - pred) / (RELTOL * 10 * Math.max(Math.abs(r.x[i]), Math.abs(x[i])) + 1e-3);
+        // 刻みの誤差は「状態」（容量の電圧・インダクタの電流）の予測からのずれで見る（ngspice が電荷で見るのと同じ考え）。
+        // 節点の電圧で見ると、接合容量だけでつながった浮いた節点（トランスの 2 次側・ブリッジの出力など）が
+        // 台形則で 1 刻みごとに振れ、刻みが育たなくなる。状態が 1 つも無い回路だけ、節点の電圧で見る
+        const vv = (xx, n) => (n ? xx[n - 1] : 0);
+        const judge = (now, cur, prev, abs) => {
+          const pred = cur + (cur - prev) * k;
+          const e = Math.abs(now - pred) / (RELTOL * 10 * Math.max(Math.abs(now), Math.abs(cur)) + abs);
           if (e > err) err = e;
+        };
+        if (lteCaps.length || lteInds.length) {
+          for (const [a, c] of lteCaps) judge(vv(r.x, a) - vv(r.x, c), vv(x, a) - vv(x, c), vv(xPrev, a) - vv(xPrev, c), 1e-3);
+          for (const br of lteInds) judge(r.x[br], x[br], xPrev[br], 1e-6);
+        } else {
+          for (let i = 0; i < this.nn; i++) judge(r.x[i], x[i], xPrev[i], 1e-3);
         }
         if (err > 4 && hh > hmin * 10) accept = false;
       }

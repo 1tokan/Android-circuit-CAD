@@ -28,6 +28,12 @@ const MAP = {
   'USB_C_HRO_TYPE-C-31-M-12': 'Connector_USB.pretty/USB_C_Receptacle_HRO_TYPE-C-31-M-12',
   'Jack_3.5mm_CUI_SJ-3524-SMT_Horizontal': 'Connector_Audio.pretty/Jack_3.5mm_CUI_SJ-3524-SMT_Horizontal',
   'JST_PH_S2B-PH-K_1x02_P2.00mm_Horizontal': 'Connector_JST.pretty/JST_PH_S2B-PH-K_1x02_P2.00mm_Horizontal',
+  // 0.13.3: 手書き用に足した部品の既定
+  Fuse_0805: 'Fuse.pretty/Fuse_0805_2012Metric', Fuse_1206: 'Fuse.pretty/Fuse_1206_3216Metric',
+  'TO-269AA': 'Package_TO_SOT_SMD.pretty/TO-269AA', // ブリッジダイオード MBxS（1=~, 2=~, 3=+, 4=-）
+  'DIP-4': 'Package_DIP.pretty/DIP-4_W7.62mm', // フォトカプラ PC817（1=A, 2=K, 3=E, 4=C）
+  Relay_SANYOU_SRD: 'Relay_THT.pretty/Relay_SPDT_SANYOU_SRD_Series_Form_C', // 1=COM, 2・5=コイル, 3=NO, 4=NC
+  Buzzer_12x9_5RM7_6: 'Buzzer_Beeper.pretty/Buzzer_12x9.5RM7.6', // 1=+（KiCad の足形のシルクの + は 1 番）
 };
 for (const n of [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20]) MAP[`PinHeader_1x${String(n).padStart(2, '0')}_P2.54mm`] = `Connector_PinHeader_2.54mm.pretty/PinHeader_1x${String(n).padStart(2, '0')}_P2.54mm_Vertical`;
 for (const n of [2, 3, 4]) MAP[`JST_PH_B${n}B-PH-K_1x${String(n).padStart(2, '0')}_P2.00mm`] = `Connector_JST.pretty/JST_PH_B${n}B-PH-K_1x${String(n).padStart(2, '0')}_P2.00mm_Vertical`;

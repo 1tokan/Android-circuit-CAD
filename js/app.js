@@ -10,6 +10,7 @@ import { createPcbEditor } from './pcb/editor.js';
 import { ensurePcb, boardRect, toMm } from './pcb/model.js';
 import { History } from './core/history.js';
 import { createSchematicEditor } from './schematic/editor.js';
+import { pickLcsc, pickAllMissing } from './library/quickpick.js';
 import { createLibrary } from './library/library.js';
 import { createPartsView } from './library/view.js';
 import { createJlcsearch } from './library/jlcsearch.js';
@@ -27,7 +28,7 @@ import { esc } from './core/util.js';
 import { log as alog, logError, projectSummary, installErrorHooks, getLog, clearLog, formatLog, flushLog } from './core/applog.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.13.2';
+const APP_VERSION = '0.13.3';
 
 const state = {
   project: null,
@@ -736,6 +737,15 @@ function ask(title, html, buttons, listMode = false) {
   });
 }
 
+/** LCSC 品番の近道に渡すもの */
+function quickCtx() {
+  return {
+    lib: state.lib, online: state.online, ui: { ask, toast },
+    sheet: () => state.project.schematic.sheets[0],
+    assign: (keys, part) => state.editor.assignParts(keys, part),
+  };
+}
+
 /** 1行入力。Enterキーでも確定できる。キャンセル時は null */
 async function promptTextWithValue(title, value) {
   const p = ask(title, `<input type="text" id="dlg-input" maxlength="80" enterkeyhint="done">`,
@@ -890,6 +900,9 @@ async function boot() {
     getProjectPart: (id) => state.project.library.parts.find((p) => p.id === id) || state.lib.get(id),
     openLibrary: (target = null) => { state.assign = target; switchWorkspace('parts'); },
     openAi: () => openAi(),
+    // LCSC 品番の近道（部品を選ぶ →「品番を探す」→ 候補に触れる）
+    pickLcsc: (comps) => pickLcsc(quickCtx(), comps.filter(Boolean)),
+    pickAllMissing: async () => { const n = await pickAllMissing(quickCtx()); if (n) toast(`${n} 個に品番を割り当てました`); state.editor.render(); },
   });
   state.pcbHistory = new History(() => state.project.pcb, (s) => { state.project.pcb = s; });
   state.pcbEditor = createPcbEditor({

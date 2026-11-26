@@ -84,6 +84,8 @@ def main():
             if sn is not None and sn != p.GetNetname(): bad('net vs schematic', r, p.GetNumber(), p.GetNetname(), sn)
             if sn is None and p.GetNetname() and p.GetNumber(): bad('pad net not in schematic', r, p.GetNumber(), p.GetNetname())
     for r in comps:
+        # シミュレーション用の信号源など、基板に載せない記号（exclude_from_board）は数えない
+        if any(pp.get('name') == 'exclude_from_board' for pp in comps[r].iter('property')): continue
         if r not in [f.GetReference() for f in fps]: bad('symbol without footprint', r)
     print('schematic components', len(comps))
 

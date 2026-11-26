@@ -72,6 +72,7 @@ await step('タップで部品を選び、キャンバスのタップ位置に�
 await step('部品一覧からキャンバスへドラッグして配置（LED → D1）', async () => {
   await ctxChip('pick');
   await page.waitForSelector('#picker:not([hidden])');
+  await page.locator('#picker-grid .pick[data-kind="led"]').scrollIntoViewIfNeeded(); // 一覧は組に分かれ、LED は 2 つ目の組
   const item = await page.locator('#picker-grid .pick[data-kind="led"]').boundingBox();
   const drop = await toScreen(5, -20);
   await touchDrag({ x: item.x + item.width / 2, y: item.y + item.height / 2 }, drop, { steps: 12 });

@@ -241,7 +241,21 @@ button { font: inherit; color: inherit; }
 .picker-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; }
 .picker-head h2 { font-size: 15px; margin: 0; }
 .picker-head .hint { flex: 1; font-size: 11px; color: var(--fg2); }
-.picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; padding: 0 10px 12px; overflow: auto; }
+.picker-grid { padding: 0 10px 12px; overflow: auto; }
+.pick-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.pick-h { font-size: 12px; font-weight: 600; color: var(--fg2); margin: 8px 2px 4px; }
+.picker-head input[type=search] { flex: 1; min-width: 0; font-size: 14px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+.picker-hint { margin: 0 14px 4px; font-size: 11px; color: var(--fg2); }
+/* LCSC 品番の近道 */
+.qp-search { display: flex; gap: 6px; margin: 4px 0 6px; }
+.qp-search input { flex: 1; min-width: 0; }
+.qp-list { max-height: 52dvh; overflow: auto; }
+.qp-h { font-size: 12px; font-weight: 600; color: var(--fg2); margin: 8px 0 4px; }
+.qp-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 8px 10px; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.qp-row:active { border-color: var(--accent); }
+.qp-main { font-size: 14px; }
+.qp-sub { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--fg2); align-items: center; }
+.qp-desc { font-size: 11px; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pick {
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; min-height: 76px;
   border: 1px solid var(--line); border-radius: 10px; background: var(--bg); cursor: pointer; font-size: 11px; touch-action: none;
