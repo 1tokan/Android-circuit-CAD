@@ -1,5 +1,5 @@
 // PCB 要素 → 2D 形状（DRC・シルク生成で使う。単位 mm、基板座標）
-import { toMm, fpToBoard, padLayers, fpBox, boardRect } from './model.js';
+import { toMm, fpToBoard, boardToFp, padLayers, fpBox, boardRect } from './model.js';
 import { textStrokes, strokeWidthFor, textWidth } from './text.js';
 
 /** 角丸パッドの角の半径 = 短辺 × この値（画面・Gerber・3D で共通） */
@@ -7,7 +7,7 @@ export const ROUNDRECT_RATIO = 0.25;
 /** パッドの角の半径（KiCad データはパッドごとの比率 rr を持つことがある） */
 export const cornerRadius = (pad) => Math.min(pad.w, pad.h) * (pad.rr ?? ROUNDRECT_RATIO);
 
-/** パッドの形状（角形・角丸は四角形として保守的に扱う） */
+/** パッドの形状（円・長円は線分＋半径、角形は多角形、角丸は多角形＋角の半径） */
 export function padShape(inst, pad) {
   if (pad.shape === 'circle') {
     const c = fpToBoard(inst, pad.x, pad.y);
@@ -18,8 +18,11 @@ export function padShape(inst, pad) {
     const hx = pad.w / 2 - r, hy = pad.h / 2 - r;
     return { type: 'cap', a: fpToBoard(inst, pad.x - hx, pad.y - hy), b: fpToBoard(inst, pad.x + hx, pad.y + hy), r };
   }
-  const hw = pad.w / 2, hh = pad.h / 2;
-  return { type: 'poly', pts: [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([dx, dy]) => fpToBoard(inst, pad.x + dx, pad.y + dy)) };
+  // 角丸は、角の半径 r だけ内側の長方形 ＋ 半径 r（Gerber・KiCad の角丸と同じ形）
+  const r = pad.shape === 'roundrect' ? cornerRadius(pad) : 0;
+  const hw = pad.w / 2 - r, hh = pad.h / 2 - r;
+  const pts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([dx, dy]) => fpToBoard(inst, pad.x + dx, pad.y + dy));
+  return r ? { type: 'poly', pts, r } : { type: 'poly', pts };
 }
 
 export function trackShape(t) {
@@ -56,6 +59,46 @@ export function silkSegments(fpDef, clearance = 0.15) {
   return out;
 }
 
+/** 線分を長方形で切る（Liang–Barsky）。外なら null */
+export function clipToRect(r) {
+  return (a, b) => {
+    let t0 = 0, t1 = 1;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    for (const [p, q] of [[-dx, a.x - r.x0], [dx, r.x1 - a.x], [-dy, a.y - r.y0], [dy, r.y1 - a.y]]) {
+      if (p === 0) { if (q < 0) return null; continue; }
+      const t = q / p;
+      if (p < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; }
+    }
+    if (t1 - t0 < 1e-9) return null;
+    return { a: { x: a.x + t0 * dx, y: a.y + t0 * dy }, b: { x: a.x + t1 * dx, y: a.y + t1 * dy } };
+  };
+}
+
+/**
+ * 基板に置いた部品のシルクの外形線（フットプリント内座標）。基板の端からはみ出すコネクタの外形線は、基板の内側で切る
+ * （はみ出した分は製造で削られるだけ。Gerber と KiCad 書き出しで同じ線にする）
+ * @returns { segs, clipped }  clipped = 切った線があったか
+ */
+export function boardSilkSegments(pcb, inst, lineW = 0.12) {
+  const segs = silkSegments(inst.fpDef);
+  const bb = boardRect(pcb), e = lineW / 2 + 0.06; // 線の半分 ＋ 外形線（0.1mm）の半分 ＋ 少し（KiCad の「シルクが基板の端で切れる」を出さない）
+  const clip = clipToRect({ x0: bb.x0 + e, y0: bb.y0 + e, x1: bb.x1 - e, y1: bb.y1 - e });
+  const out = [];
+  let clipped = false;
+  const r6 = (v) => Math.round(v * 1e6) / 1e6;
+  for (const sg of segs) {
+    const A = fpToBoard(inst, sg.a.x, sg.a.y), B = fpToBoard(inst, sg.b.x, sg.b.y);
+    const c = clip(A, B);
+    if (!c) { clipped = true; continue; }
+    if (Math.hypot(c.a.x - A.x, c.a.y - A.y) > 1e-6 || Math.hypot(c.b.x - B.x, c.b.y - B.y) > 1e-6) {
+      clipped = true;
+      const la = boardToFp(inst, c.a.x, c.a.y), lb = boardToFp(inst, c.b.x, c.b.y);
+      out.push({ a: { x: r6(la.x), y: r6(la.y) }, b: { x: r6(lb.x), y: r6(lb.y) } });
+    } else out.push(sg);
+  }
+  return { segs: out, clipped };
+}
+
 function subtract(intervals, a, b) {
   const out = [];
   for (const [s, e] of intervals) {
@@ -65,6 +108,9 @@ function subtract(intervals, a, b) {
   }
   return out;
 }
+
+/** 1 番ピンの印（シルクの丸）の半径 mm（Gerber は直径 0.4 の点、KiCad は半径 0.1・線幅 0.2 の塗った円） */
+export const PIN1_MARK_R = 0.2;
 
 /** 1 番ピンの印の位置（フットプリント内座標）。パッドの外側、本体の外 */
 export function pin1Mark(fpDef) {
@@ -110,6 +156,21 @@ export function placeRefdes(pcb, { gap = 0.15, dryRun = false, refs = null } = {
     if (p.type === 'tht') { padBoxes.top.push(b); padBoxes.bottom.push(b); } else padBoxes[f.side === 'bottom' ? 'bottom' : 'top'].push(b);
   }
   const texts = { top: [], bottom: [] };
+  // 部品の外形線（シルク）も避ける（KiCad の「シルクの重なり」）
+  for (const f of pcb.footprints) {
+    const side = f.side === 'bottom' ? 'bottom' : 'top', w = 0.06;
+    for (const sg of boardSilkSegments(pcb, f).segs) {
+      const a = fpToBoard(f, sg.a.x, sg.a.y), b = fpToBoard(f, sg.b.x, sg.b.y);
+      texts[side].push({ x0: Math.min(a.x, b.x) - w, y0: Math.min(a.y, b.y) - w, x1: Math.max(a.x, b.x) + w, y1: Math.max(a.y, b.y) + w });
+    }
+  }
+  // 1 番ピンの印も避ける（KiCad の「シルクの重なり」）
+  for (const f of pcb.footprints) {
+    const m = pin1Mark(f.fpDef);
+    if (!m) continue;
+    const c = fpToBoard(f, m.x, m.y), r = PIN1_MARK_R;
+    texts[f.side === 'bottom' ? 'bottom' : 'top'].push({ x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r });
+  }
   const okAt = (side, b) => b.x0 >= br.x0 + 0.2 && b.x1 <= br.x1 - 0.2 && b.y0 >= br.y0 + 0.2 && b.y1 <= br.y1 - 0.2
     && padBoxes[side].every((q) => boxGap(b, q) >= gap) && texts[side].every((q) => boxGap(b, q) >= 0.1);
   const moved = [], conflicts = [];

@@ -11,6 +11,27 @@ export const PIXEL_UA = 'Mozilla/5.0 (Linux; Android 15; Pixel 9a) AppleWebKit/5
 const MOBILE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 
 /**
+ * SERVE=route: Web サーバーを立てずに、リポジトリのファイルをブラウザの通信の横取りで返す（ポートを開けない環境用）。
+ * テストが後から作るコンテキスト（タブレット表示など）にも同じ横取りを付ける
+ */
+function serveByRoute(browser) {
+  const root = new globalThis.URL('../', import.meta.url).pathname;
+  const types = { html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', json: 'application/json', webmanifest: 'application/manifest+json', svg: 'image/svg+xml', png: 'image/png', wasm: 'application/wasm' };
+  const orig = browser.newContext.bind(browser);
+  browser.newContext = async (o) => {
+    const c = await orig(o);
+    await c.route(`${URL_}**`, async (route) => {
+      let rel = decodeURIComponent(new globalThis.URL(route.request().url()).pathname).replace(/^\/+/, '') || 'index.html';
+      if (rel.endsWith('/')) rel += 'index.html';
+      const file = root + rel;
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) return route.fulfill({ status: 404, body: 'not found' });
+      return route.fulfill({ status: 200, contentType: types[rel.split('.').pop()] || 'application/octet-stream', body: fs.readFileSync(file) });
+    });
+    return c;
+  };
+}
+
+/**
  * @param {object} o
  * @param {number} [o.timeout] page のデフォルトタイムアウト(ms)
  * @param {boolean} [o.gpu] WebGL 用に SwiftShader を有効化
@@ -27,6 +48,7 @@ export async function openApp({ timeout = 6000, gpu = false, context = {}, bundl
     env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
     args,
   });
+  if (process.env.SERVE === 'route') serveByRoute(browser);
   const ctx = await browser.newContext({ ...MOBILE, ...context });
   const page = await ctx.newPage();
   page.setDefaultTimeout(timeout);

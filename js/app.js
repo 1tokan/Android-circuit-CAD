@@ -20,13 +20,14 @@ import { createCheckView } from './check/view.js';
 import { ercStatus } from './check/erc.js';
 import { drcStatus } from './check/drc.js';
 import { createOutputView } from './output/view.js';
+import { createSimView } from './sim/view.js';
 import { createAiView } from './ai/view.js';
 import { applySpec, projectFromSpec } from './ai/spec.js';
 import { esc } from './core/util.js';
 import { log as alog, logError, projectSummary, installErrorHooks, getLog, clearLog, formatLog, flushLog } from './core/applog.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.12.8';
+const APP_VERSION = '0.13.0';
 
 const state = {
   project: null,
@@ -228,6 +229,12 @@ function onTool(id) {
     else { state.outputView.setTab('asm'); state.outputView.exportAssembly(id); }
     return;
   }
+  if (state.workspace === 'sim') {
+    if (id === 'run') state.simView.run();
+    else if (id === 'source') state.simView.addSource();
+    else if (id === 'spice') state.simView.exportSpice();
+    return;
+  }
   if (state.workspace === 'check') {
     if (id === 'rules') state.checkView.editRules();
     else state.checkView.run(id);
@@ -387,12 +394,14 @@ function renderOverlay() {
   pv.hidden = state.workspace !== 'parts';
   $('#check-view').hidden = state.workspace !== 'check';
   $('#output-view').hidden = state.workspace !== 'output';
-  const noCanvas = ['parts', 'check', 'output'].includes(state.workspace);
+  $('#sim-view').hidden = state.workspace !== 'sim';
+  const noCanvas = ['parts', 'check', 'output', 'sim'].includes(state.workspace);
   document.querySelector('.zoom-ctl').hidden = noCanvas;
   $('#coords').hidden = noCanvas;
   if (state.workspace === 'parts') state.partsView.render();
   if (state.workspace === 'check') state.checkView.render();
   if (state.workspace === 'output') state.outputView.render();
+  if (state.workspace === 'sim') state.simView.render();
   // 一部でも実装済みならキャンバスを塞がない（未実装分はサイドパネル・モジュール状況に表示）
   if (workspaceStatus(ws) !== 'planned') { ov.hidden = true; return; }
   ov.hidden = false;
@@ -927,6 +936,20 @@ async function boot() {
     editPcb: (fn, label) => editPcb(fn, label),
     mutate: (fn, reason) => mutateProject(fn, reason),
     open3d: () => open3d(),
+  });
+  state.simView = createSimView({
+    root: $('#sim-view'),
+    getProject: () => state.project,
+    // 回路図から作ったネットリスト（古ければ作り直す。保存はしない）
+    getNetlist: () => (netlistStatus(state.project) === 'current' && state.project.netlist ? state.project.netlist : generateNetlist(state.project)),
+    mutate: (fn, reason) => mutateProject(fn, reason),
+    // チューニングで決めた値を回路図の部品へ
+    applyValue: (ref, value) => editSchematic(() => {
+      for (const sh of state.project.schematic.sheets) for (const c of sh.components) if (c.ref === ref) c.props = { ...c.props, value };
+    }, `値 ${ref}`),
+    version: APP_VERSION,
+    log: (kind, msg, data) => alog(kind, msg, data),
+    ask, toast, download,
   });
   state.aiView = createAiView({
     root: $('#ai-view'),

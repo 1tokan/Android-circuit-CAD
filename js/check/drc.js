@@ -4,9 +4,9 @@
 //
 // 既定値は JLCPCB の 1〜2 層標準品の製造能力（2026年11月確認）に合わせる。プロジェクトの board.rules で上書きできる。
 
-import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg, copperLayers, padHole, fpToBoard, boardHoles } from '../pcb/model.js';
+import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg, copperLayers, padHole, fpToBoard, boardHoles, holeClearRadiusMm } from '../pcb/model.js';
 import { computePcbConnectivity } from '../pcb/connectivity.js';
-import { padShape, trackShape, circleShape, silkSegments, silkTexts } from '../pcb/shapes.js';
+import { padShape, trackShape, circleShape, boardSilkSegments, silkTexts, pin1Mark, PIN1_MARK_R } from '../pcb/shapes.js';
 import { SILK_LINE_MM, unsupportedChars } from '../pcb/text.js';
 import { shapeDist, shapeSegDist, shapeBox, boxesNear, shapeCenter, nearestPoint, pointInRing, segSegDist } from '../core/geom2d.js';
 import { hash, sourceHash } from '../netlist/netlist.js';
@@ -26,12 +26,14 @@ export const DRC_RULES = [
   { id: 'edge_clearance', label: '銅と基板外形の間隔・基板外の銅' },
   { id: 'hole_to_hole', label: '穴どうしの間隔（異なるネット・同じネット）' },
   { id: 'npth_clearance', label: '取付穴（非メッキ）と銅の間隔' },
+  { id: 'hole_keepout', label: '取付穴のネジの頭の範囲（keepout）にかかる銅・部品' },
   { id: 'unrouted', label: '未配線の接続（ラッツネスト）' },
   { id: 'dangling_track', label: '端が何にも接続されていない配線' },
   { id: 'track_net', label: '配線のネットと、つながっているパッドのネットの食い違い' },
   { id: 'outside_board', label: '基板の外に置かれた部品・はみ出した部品' },
   { id: 'courtyard_overlap', label: '同じ面の部品どうしの重なり（外形枠）' },
   { id: 'silk_pad', label: 'シルク（部品番号・文字・他部品の外形線）とパッドの重なり（文字幅は推定）' },
+  { id: 'silk_overlap', label: 'シルクどうしの重なり（部品番号・文字と 1 番ピンの印・部品の外形線）' },
   { id: 'silk_outside', label: '基板の外のシルク文字' },
   { id: 'silk_size', label: 'シルク文字の高さ・線幅、出力できない文字（ASCII以外）' },
   { id: 'mask_bridge', label: 'レジストのブリッジ幅（隣り合うパッドの開口の間に残るレジスト）' },
@@ -170,6 +172,7 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   }
 
   // ---- 穴 ----
+  const c0 = (h) => ({ x: toMm(h.x), y: toMm(h.y) });
   const drills = [];
   for (const p of pads) if (p.pad.type === 'tht') { const h = padHole(p.inst, p.pad); drills.push({ c: { x: p.x, y: p.y }, a: h.a, b: h.b, r: h.d / 2, net: p.net || `~${p.inst.id}:${p.pad.num}`, label: `${p.ref}-${p.pad.num}${h.slot ? '（長穴）' : ''}`, ref: p.ref }); }
   for (const v of pcb.vias) drills.push({ c: { x: toMm(v.x), y: toMm(v.y) }, r: toMm(v.drill) / 2, net: v.net || `~v:${v.id}`, label: `ビア（${v.net || 'ネットなし'}）` });
@@ -189,7 +192,18 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     for (const it of items) {
       if (h.ref && it.ref === h.ref) continue; // 部品の位置決めの穴と、その部品のパッド（部品の設計どおり）
       const gap = shapeDist(hs, it.shape);
-      if (gap < R.minNpthToCopperMm - 1e-6) add('error', 'npth_clearance', `取付穴と ${it.label} の間隔 ${fmt(Math.max(0, gap))}mm（最小 ${R.minNpthToCopperMm}mm）`, it.ref ? [it.ref] : [], { x: toMm(h.x), y: toMm(h.y) });
+      if (gap < R.minNpthToCopperMm - 1e-6) { add('error', 'npth_clearance', `取付穴と ${it.label} の間隔 ${fmt(Math.max(0, gap))}mm（最小 ${R.minNpthToCopperMm}mm）`, it.ref ? [it.ref] : [], { x: toMm(h.x), y: toMm(h.y) }); continue; }
+      // ネジの頭の範囲（keepout）: 頭やスペーサーが銅に当たると、レジストが削れて短絡する
+      if (h.keepout && gap + toMm(h.drill) / 2 < toMm(h.keepout) / 2 - 1e-6) add('error', 'hole_keepout', `取付穴のネジの頭の範囲（φ${fmt(toMm(h.keepout))}）に ${it.label} があります`, it.ref ? [it.ref] : [], { x: toMm(h.x), y: toMm(h.y) });
+    }
+    if (h.keepout) {
+      const kr = toMm(h.keepout) / 2;
+      for (const f of pcb.footprints) {
+        if (h.ref && f.ref === h.ref) continue;
+        const b = fpBox(f);
+        const dx = Math.max(b.x0 - c0(h).x, 0, c0(h).x - b.x1), dy = Math.max(b.y0 - c0(h).y, 0, c0(h).y - b.y1);
+        if (Math.hypot(dx, dy) < kr - 1e-6) add('error', 'hole_keepout', `${f.ref} の外形が取付穴のネジの頭の範囲（φ${fmt(toMm(h.keepout))}）にかかっています`, [f.ref], c0(h));
+      }
     }
     const c = { x: toMm(h.x), y: toMm(h.y) };
     if (!inside(c)) add('error', 'edge_clearance', '取付穴が基板の外にあります', [], c);
@@ -244,6 +258,23 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   // 文字は実際に出力するストローク（太さ込み）で判定する
   const padsOnSide = (side) => items.filter((it) => it.kind === 'pad' && it.layers.includes(side === 'bottom' ? 'B.Cu' : 'F.Cu'));
   const unplaced = new Set(issues.filter((i) => i.rule === 'outside_board' && i.level === 'error').map((i) => i.refs[0]));
+  // 1 番ピンの印（シルクの丸）
+  const marks = [];
+  for (const f of pcb.footprints) {
+    const m = pin1Mark(f.fpDef);
+    if (!m || unplaced.has(f.ref)) continue;
+    const c = fpToBoard(f, m.x, m.y);
+    marks.push({ f, side: f.side === 'bottom' ? 'bottom' : 'top', shape: { type: 'cap', a: c, b: c, r: PIN1_MARK_R }, at: c });
+  }
+  const outlines = [];
+  for (const f of pcb.footprints) {
+    if (unplaced.has(f.ref)) continue;
+    for (const sg of boardSilkSegments(pcb, f, SILK_LINE_MM).segs) outlines.push({ f, side: f.side === 'bottom' ? 'bottom' : 'top', a: fpToBoard(f, sg.a.x, sg.a.y), b: fpToBoard(f, sg.b.x, sg.b.y) });
+  }
+  for (const mk of marks) {
+    const hit = padsOnSide(mk.side).find((it) => boxesNear(shapeBox(mk.shape), it.box, R.minSilkToPadMm) && shapeDist(mk.shape, it.shape) < R.minSilkToPadMm - 1e-6);
+    if (hit) add('warning', 'silk_pad', `${mk.f.ref} の 1 番ピンの印（シルク）が ${hit.label} のパッドにかかっています（製造時に削られます）`, [mk.f.ref, hit.ref].filter(Boolean), mk.at);
+  }
   for (const t of silkTexts(pcb)) {
     if (t.kind === 'refdes' && unplaced.has(t.text)) continue;
     const name = t.kind === 'refdes' ? `部品番号 ${t.text}` : `文字「${t.text}」`;
@@ -256,6 +287,14 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
       const sb = shapeBox(seg);
       for (const it of pads2) if (boxesNear(sb, it.box, R.minSilkToPadMm) && shapeDist(seg, it.shape) < R.minSilkToPadMm - 1e-6) hits.add(it);
     }
+    // 部品番号・文字と 1 番ピンの印の重なり（KiCad の「シルクの重なり」）
+    const mhit = marks.find((mk) => mk.side === side && t.strokes.some((st) => st.some((q, k) => k > 0 && shapeDist({ type: 'cap', a: st[k - 1], b: q, r: t.width / 2 }, mk.shape) < 0)));
+    if (mhit) add('warning', 'silk_overlap', `${name} が ${mhit.f.ref} の 1 番ピンの印に重なっています`, [...refs, mhit.f.ref], t.at);
+    else {
+      // 部品の外形線（シルク）との重なり
+      const lhit = outlines.find((o) => o.side === side && t.strokes.some((st) => st.some((q, k) => k > 0 && segSegDist(st[k - 1], q, o.a, o.b) < t.width / 2 + SILK_LINE_MM / 2)));
+      if (lhit) add('warning', 'silk_overlap', `${name} が ${lhit.f.ref} の外形線（シルク）に重なっています`, [...refs, lhit.f.ref], t.at);
+    }
     if (hits.size) add('warning', 'silk_pad', `${name} のシルクがパッド ${[...hits].slice(0, 3).map((h) => h.label).join(', ')} にかかっています（製造時に削られます）`, refs, t.at);
     if (!inside(t.at)) add('warning', 'silk_outside', `${name} が基板の外です`, refs, t.at);
     if (t.size + 1e-9 < R.minSilkTextHeightMm) add('warning', 'silk_size', `${name} の高さ ${fmt(t.size)}mm が最小 ${R.minSilkTextHeightMm}mm 未満です（読めなくなります）`, refs, t.at);
@@ -267,7 +306,7 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   for (const f of pcb.footprints) {
     if (unplaced.has(f.ref)) continue;
     // 外形線は自分のパッドの周りで切ってあるので、他の部品のパッドとだけ比べる
-    const segs = silkSegments(f.fpDef);
+    const segs = boardSilkSegments(pcb, f, SILK_LINE_MM).segs; // 出力と同じ（基板の端で切った）線
     const others = padsOnSide(f.side).filter((it) => it.inst !== f);
     let hit = null;
     for (const s2 of segs) {

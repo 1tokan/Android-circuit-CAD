@@ -30,13 +30,17 @@ await step('スマホ縦画面: 上部・タブ・キャンバス・下部ツー
   await page.screenshot({ path: `${OUT}/phone-portrait.png` });
 });
 
-await step('全段階の機能が有効（未実装の表示なし）・出力タブのツールが有効', async () => {
+await step('全段階の機能が有効（未実装の段階なし。シミュレーションは一部実装と表示）・出力タブのツールが有効', async () => {
   await page.locator('#ws-nav button[data-ws="output"]').click();
   assert.equal(await page.locator('#ws-nav button[aria-current="page"]').getAttribute('data-ws'), 'output');
   assert.ok(!(await page.locator('#stage-overlay').isVisible()));
   for (const id of ['gerber', 'bom', 'cpl']) assert.ok(await page.locator(`#toolbar .tool[data-tool="${id}"]`).isEnabled(), id);
-  assert.doesNotMatch(await page.locator('#module-status').textContent(), /未実装/);
-  assert.equal(await page.locator('#ws-nav .badge').count(), 0);
+  // 未実装の段階は無い。回路シミュレーションだけ「一部実装」（未実装の解析・素子を説明に書く）
+  assert.equal(await page.locator('#module-status .badge.planned').count(), 0);
+  assert.equal(await page.locator('#module-status .badge.partial').count(), 1);
+  assert.match(await page.locator('#module-status').textContent(), /回路シミュレーション.*未実装: 雑音解析/);
+  assert.equal(await page.locator('#ws-nav .badge').count(), 1);
+  assert.equal(await page.locator('#ws-nav button[data-ws="sim"] .badge.partial').count(), 1);
   await page.locator('#ws-nav button[data-ws="schematic"]').click();
   assert.ok(!(await page.locator('#stage-overlay').isVisible()), '回路図はキャンバスを塞がない');
   assert.ok(await page.locator('#toolbar .tool:not([disabled])').count() >= 8);

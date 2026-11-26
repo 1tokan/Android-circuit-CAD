@@ -264,10 +264,44 @@ export function boardHoles(pcb) {
   return out;
 }
 
-export function addHole(pcb, x, y, drillMm = 3.2) {
+/**
+ * 取付穴（非メッキ）を置く
+ * @param keepoutMm ネジの頭・スペーサーが当たる範囲の直径（0 = なし）。この円の中には別の銅（配線・ビア・ベタ・パッド）を置かない
+ */
+export function addHole(pcb, x, y, drillMm = 3.2, keepoutMm = 0) {
   const h = { id: newId('h'), x: toNm(x), y: toNm(y), drill: toNm(drillMm) };
+  if (keepoutMm > drillMm) h.keepout = toNm(keepoutMm);
   pcb.holes.push(h);
   return h;
+}
+
+/** ネジの規格ごとの取付穴（穴径・ネジの頭が当たる範囲の直径）。M3 なら穴 3.2mm、なべ小ねじの頭 φ5.5 ＋ ずれの余裕で φ6.0 */
+export const SCREW_HOLES = {
+  M2: { drillMm: 2.2, keepoutMm: 4.2 },
+  'M2.5': { drillMm: 2.7, keepoutMm: 5.0 },
+  M3: { drillMm: 3.2, keepoutMm: 6.0 },
+};
+
+/** 穴のまわりで別の銅を避ける半径（mm）= max(穴の半径 ＋ 穴と銅の間隔, ネジの頭の範囲の半径) */
+export function holeClearRadiusMm(h, npthToCopperMm = 0) {
+  return Math.max(toMm(h.drill) / 2 + npthToCopperMm, h.keepout ? toMm(h.keepout) / 2 : 0);
+}
+
+/**
+ * 長方形の基板の四隅に取付穴を置く（同じ位置の穴があれば置かない）
+ * @param opt { screw: 'M3' など, insetMm: 角から穴の中心まで（既定 = ネジの頭の範囲の半径 ＋ 0.5mm） }
+ * @returns 置いた穴
+ */
+export function addCornerHoles(pcb, opt = {}) {
+  const sp = SCREW_HOLES[opt.screw || 'M3'] || SCREW_HOLES.M3;
+  const inset = opt.insetMm ?? sp.keepoutMm / 2 + 0.5;
+  const b = boardRect(pcb);
+  const out = [];
+  for (const [x, y] of [[b.x0 + inset, b.y0 + inset], [b.x1 - inset, b.y0 + inset], [b.x1 - inset, b.y1 - inset], [b.x0 + inset, b.y1 - inset]]) {
+    if (pcb.holes.some((h) => Math.hypot(toMm(h.x) - x, toMm(h.y) - y) < 0.01)) continue;
+    out.push(addHole(pcb, x, y, sp.drillMm, sp.keepoutMm));
+  }
+  return out;
 }
 
 export function setOutlineRect(pcb, wMm, hMm) {

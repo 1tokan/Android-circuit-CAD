@@ -7,7 +7,7 @@
 // 座標は mm。結果の多角形は [[[x,y],...外周], [[x,y],...穴]...] の配列（polygon-clipping 形式）。
 
 import pc from '../vendor/polygon-clipping.js';
-import { allPads, toMm, boardRect, fpToBoard, boardHoles } from './model.js';
+import { allPads, toMm, boardRect, fpToBoard, boardHoles, holeClearRadiusMm } from './model.js';
 import { hash } from '../netlist/netlist.js';
 import { pointInRing as inRing } from '../core/geom2d.js';
 import { withDefaults } from '../check/rules.js';
@@ -94,7 +94,48 @@ function zoneParams(z, rules = {}) {
     edge: Math.max(ZONE_DEFAULTS.edgeClearanceMm, rules.boardEdgeClearanceMm ?? 0),
     npth: Math.max(ZONE_DEFAULTS.npthClearanceMm, rules.minNpthToCopperMm ?? 0),
     padConnection: z.padConnection || 'thermal', // 'thermal' | 'solid'
+    minSpokes: rules.minThermalSpokes ?? null, // これより少ないパッドは 45° のスポークを試す
+    minWidth: z.minWidth ? toMm(z.minWidth) : 0.25, // ベタの最小幅（KiCad はこれより細い所を塗らない）
   };
+}
+
+/**
+ * スポークの先端 q の先に、半径 r の円が塗れる場所があるか（KiCad はベタの最小幅より細い所を塗らない）。
+ * 円の中心は先端、または先端から横（スポークに直角）へ r ずらした所。円は中心と円周の 8 点で調べる
+ */
+function fatIn(q, polys, r) {
+  const inside = (x, y) => polys.some((poly) => pointInPolyWithHoles({ x, y }, poly));
+  const disc = (cx, cy) => inside(cx, cy) && Array.from({ length: 8 }, (_, k) => (k * Math.PI) / 4).every((a) => inside(cx + r * Math.cos(a), cy + r * Math.sin(a)));
+  const nx = -(q.uy || 0), ny = q.ux || 0;
+  return disc(q.x, q.y) || disc(q.x + nx * r, q.y + ny * r) || disc(q.x - nx * r, q.y - ny * r);
+}
+
+/**
+ * サーマルのスポークの形と先端（基板座標）。angle 0 = パッドの縦横の 4 本、45 = 斜めの 4 本（KiCad のスポークの角度 90°／45°）
+ * 先端は隙間の外側（ベタにつながったかを数える点）
+ */
+export function spokeGeom(p, P, angle = 0) {
+  const pad = p.pad, hw = P.spoke / 2;
+  const dirs = angle === 45 ? [[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([x, y]) => [x / Math.SQRT2, y / Math.SQRT2]) : [[1, 0], [0, 1], [-1, 0], [0, -1]];
+  // パッドの中心から方向 (dx,dy) に進んで、パッドの外へ出るまでの長さ
+  const exitLen = (dx, dy) => Math.min(dx ? pad.w / 2 / Math.abs(dx) : Infinity, dy ? pad.h / 2 / Math.abs(dy) : Infinity);
+  const tips = [], rects = [];
+  for (const [dx, dy] of dirs) {
+    const slant = dx && dy ? Math.SQRT2 : 1; // 斜めに横切ると隙間の幅が長くなる
+    const e = exitLen(dx, dy) + P.thermalGap * slant;
+    // 先端は隙間の外へ「ベタの最小幅の半分」だけ出た点。そこを中心に最小幅の円が塗れていれば、つながったとみなす（KiCad は細い所を塗らない）
+    const t = fpToBoard(p.inst, pad.x + dx * (e + P.spoke / 2 + P.minWidth / 2), pad.y + dy * (e + P.spoke / 2 + P.minWidth / 2));
+    const o = fpToBoard(p.inst, pad.x, pad.y), l = Math.hypot(t.x - o.x, t.y - o.y) || 1;
+    tips.push({ x: t.x, y: t.y, ux: (t.x - o.x) / l, uy: (t.y - o.y) / l });
+  }
+  // 中心を通る 2 本の棒（向かい合う 2 方向で 1 本）
+  for (const [dx, dy] of dirs.slice(0, 2)) { // 直交する 2 方向
+    const L = exitLen(dx, dy) + P.thermalGap * (dx && dy ? Math.SQRT2 : 1) + P.spoke;
+    const a = fpToBoard(p.inst, pad.x - dx * L, pad.y - dy * L), b = fpToBoard(p.inst, pad.x + dx * L, pad.y + dy * L);
+    const l = Math.hypot(b.x - a.x, b.y - a.y), nx = (-(b.y - a.y) / l) * hw, ny = ((b.x - a.x) / l) * hw;
+    rects.push([close([[a.x + nx, a.y + ny], [b.x + nx, b.y + ny], [b.x - nx, b.y - ny], [a.x - nx, a.y - ny]])]);
+  }
+  return { tips, rects };
 }
 
 /**
@@ -119,21 +160,10 @@ export function fillZone(pcb, z, rules = {}) {
   for (const p of pads) {
     if (z.net && p.net === z.net) {
       anchors.push({ x: p.x, y: p.y });
-      if (P.padConnection === 'solid') continue;
+      if (P.padConnection === 'solid' || p.inst.zoneConnect === 'solid') continue; // 直結（部品ごとの設定もある）
       gaps.push([padPoly(p.inst, p.pad, P.thermalGap)]);
-      // スポーク: パッドの縦横方向（部品の回転に合わせる）。パッド中心を通る十字
-      const L = Math.max(p.pad.w, p.pad.h) / 2 + P.thermalGap + P.spoke;
-      const hw = P.spoke / 2;
-      // スポークの先端（隙間の外側、パッドの縦横 4 方向）
-      const tips = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => fpToBoard(p.inst, p.pad.x + dx * (Math.abs(dx) * p.pad.w / 2 + Math.abs(dy) * p.pad.h / 2 + P.thermalGap + P.spoke / 2), p.pad.y + dy * (Math.abs(dx) * p.pad.w / 2 + Math.abs(dy) * p.pad.h / 2 + P.thermalGap + P.spoke / 2)));
-      thermal.push({ ref: p.ref, pad: p.pad.num, x: p.x, y: p.y, tips });
-      for (const [dx, dy] of [[1, 0], [0, 1]]) {
-        const a = fpToBoard(p.inst, p.pad.x - dx * L, p.pad.y - dy * L);
-        const b = fpToBoard(p.inst, p.pad.x + dx * L, p.pad.y + dy * L);
-        const ux = (b.x - a.x) / Math.hypot(b.x - a.x, b.y - a.y), uy = (b.y - a.y) / Math.hypot(b.x - a.x, b.y - a.y);
-        const nx = -uy * hw, ny = ux * hw;
-        spokes.push([close([[a.x + nx, a.y + ny], [b.x + nx, b.y + ny], [b.x - nx, b.y - ny], [a.x - nx, a.y - ny]])]);
-      }
+      // スポークの向きは、まずパッドの縦横（部品の回転に合わせる）。足りなければ後で 45°（片面のパッドだけ。KiCad のパッドの「スポークの角度」）
+      thermal.push({ ref: p.ref, pad: p.pad.num, x: p.x, y: p.y, p, angle: 0, single: p.layers.length === 1 });
     } else {
       obstacles.push([padPoly(p.inst, p.pad, P.clearance)]);
     }
@@ -151,12 +181,24 @@ export function fillZone(pcb, z, rules = {}) {
   }
   for (const h of boardHoles(pcb)) {
     const c = { x: toMm(h.x), y: toMm(h.y) };
-    obstacles.push([capsulePoly(c, c, toMm(h.drill) / 2 + P.npth)]);
+    obstacles.push([capsulePoly(c, c, holeClearRadiusMm(h, P.npth))]); // ネジの頭の範囲（keepout）にもベタを入れない
   }
 
   let fill = obstacles.length ? safeDifference(area, obstacles) : area;
   if (gaps.length && fill.length) {
     const cut = safeDifference(fill, gaps);
+    // スポークの先端が、隙間を空けたあとのベタに届くか（ベタにつながる本数）
+    const reach = (tips) => tips.filter((q) => fatIn(q, cut, P.minWidth / 2)).length;
+    for (const t of thermal) {
+      const g0 = spokeGeom(t.p, P, 0);
+      t.angle = 0; t.tips = g0.tips; t.rects = g0.rects;
+      if (!t.single || P.minSpokes == null) continue;
+      const n0 = reach(g0.tips);
+      if (n0 >= P.minSpokes) continue;
+      const g45 = spokeGeom(t.p, P, 45);
+      if (reach(g45.tips) > n0) { t.angle = 45; t.tips = g45.tips; t.rects = g45.rects; }
+    }
+    for (const t of thermal) spokes.push(...t.rects);
     const sp = spokes.length ? pc.intersection(pc.union(...spokes), fill) : [];
     fill = sp.length ? pc.union(cut, sp) : cut;
   }
@@ -170,7 +212,7 @@ export function fillZone(pcb, z, rules = {}) {
   const r6 = (v) => Math.round(v * 1e5) / 1e5;
   const polygons = fill.map((poly) => poly.map((ring) => ring.map(([x, y]) => [r6(x), r6(y)])));
   // パッドごとの、ベタにつながったスポークの数（KiCad の「サーマルのスポーク不足」と同じ考え方。配線でのつながりは数えない）
-  const spokeCount = thermal.map((t) => ({ ref: t.ref, pad: t.pad, x: t.x, y: t.y, spokes: t.tips.filter((q) => fill.some((poly) => pointInPolyWithHoles(q, poly))).length }));
+  const spokeCount = thermal.map((t) => ({ ref: t.ref, pad: t.pad, x: t.x, y: t.y, angle: t.angle, spokes: (t.tips || []).filter((q) => fatIn(q, fill, P.minWidth / 2)).length }));
   return { polygons, islandsRemoved, spokeCount, params: P };
 }
 
@@ -235,9 +277,9 @@ function grow(poly, d) {
 export function fillHash(pcb, rules = {}) {
   const geo = {
     o: pcb.outline,
-    f: pcb.footprints.map((f) => [f.id, f.x, f.y, f.rot, f.side, f.padNets, f.fpDef.pads]),
+    f: pcb.footprints.map((f) => [f.id, f.x, f.y, f.rot, f.side, f.padNets, f.fpDef.pads, f.zoneConnect || '']),
     t: pcb.tracks, v: pcb.vias, h: pcb.holes, z: pcb.zones,
-    r: [rules.minClearanceMm, rules.minPadClearanceMm, rules.boardEdgeClearanceMm, rules.minNpthToCopperMm],
+    r: [rules.minClearanceMm, rules.minPadClearanceMm, rules.boardEdgeClearanceMm, rules.minNpthToCopperMm, rules.minThermalSpokes],
   };
   return hash(JSON.stringify(geo));
 }

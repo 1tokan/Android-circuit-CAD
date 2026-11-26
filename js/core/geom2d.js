@@ -1,6 +1,6 @@
 // 2D 形状の距離計算（DRC 用、単位 mm）
 // 形状: { type:'cap', a:{x,y}, b:{x,y}, r }  … 線分＋半径（配線・円形パッド・ビア・穴。円は a=b）
-//       { type:'poly', pts:[{x,y}...] }       … 凸多角形（角形パッド）
+//       { type:'poly', pts:[{x,y}...], r? }   … 凸多角形（角形パッド）。r があれば、その半径で角を丸めた形（角丸パッド = 内側の長方形 ＋ 半径 r）
 
 export function pointSegDist(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -48,22 +48,23 @@ function polyPolyDist(A, B) {
 
 /** 2形状の隙間（重なっていれば 0 以下） */
 export function shapeDist(s, t) {
-  if (s.type === 'cap' && t.type === 'cap') return segSegDist(s.a, s.b, t.a, t.b) - s.r - t.r;
-  if (s.type === 'poly' && t.type === 'cap') return polySegDist(s.pts, t.a, t.b) - t.r;
-  if (s.type === 'cap' && t.type === 'poly') return polySegDist(t.pts, s.a, s.b) - s.r;
-  return polyPolyDist(s.pts, t.pts);
+  const rs = s.r || 0, rt = t.r || 0;
+  if (s.type === 'cap' && t.type === 'cap') return segSegDist(s.a, s.b, t.a, t.b) - rs - rt;
+  if (s.type === 'poly' && t.type === 'cap') return polySegDist(s.pts, t.a, t.b) - rs - rt;
+  if (s.type === 'cap' && t.type === 'poly') return polySegDist(t.pts, s.a, s.b) - rs - rt;
+  return polyPolyDist(s.pts, t.pts) - rs - rt;
 }
 
 /** 形状と線分（太さ0）の距離 */
 export function shapeSegDist(s, a, b) {
   if (s.type === 'cap') return segSegDist(s.a, s.b, a, b) - s.r;
-  return polySegDist(s.pts, a, b);
+  return polySegDist(s.pts, a, b) - (s.r || 0);
 }
 
 export function shapeBox(s) {
   if (s.type === 'cap') return { x0: Math.min(s.a.x, s.b.x) - s.r, y0: Math.min(s.a.y, s.b.y) - s.r, x1: Math.max(s.a.x, s.b.x) + s.r, y1: Math.max(s.a.y, s.b.y) + s.r };
-  const xs = s.pts.map((p) => p.x), ys = s.pts.map((p) => p.y);
-  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  const xs = s.pts.map((p) => p.x), ys = s.pts.map((p) => p.y), r = s.r || 0;
+  return { x0: Math.min(...xs) - r, y0: Math.min(...ys) - r, x1: Math.max(...xs) + r, y1: Math.max(...ys) + r };
 }
 export function boxesNear(a, b, gap) {
   return a.x0 - gap <= b.x1 && b.x0 - gap <= a.x1 && a.y0 - gap <= b.y1 && b.y0 - gap <= a.y1;

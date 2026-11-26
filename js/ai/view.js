@@ -2,7 +2,8 @@
 // 目的を書く → Claude が仕様（requirements）・部品・ネット・注意点・確認事項を返す → 回路図に作図。
 // 呼び出し方: ①利用者の API キーで直接 ②キー無し: claude.ai 用の依頼文をコピーし、返ってきた JSON を貼り付け
 import { esc } from '../core/util.js';
-import { callClaude, MODELS, ClaudeError } from './claude.js';
+import { ClaudeError } from './claude.js';
+import { designTurn, PLANS, planOf, usageText } from './pipeline.js';
 import { systemPrompt, userMessage, pasteablePrompt } from './prompt.js';
 import { RESPONSE_SCHEMA, validateSpec, exportSpec, extractJson, unwrap } from './spec.js';
 import { layerCount } from '../check/rules.js';
@@ -11,13 +12,13 @@ import { layerCount } from '../check/rules.js';
  * @param ctx { root, getProject, mutate, applySpec(circuit, mode), ask, toast, getSetting, setSetting, close }
  */
 export function createAiView(ctx) {
-  const st = { busy: false, abort: null, key: '', model: MODELS[0].id, saveKey: false, loaded: false };
+  const st = { busy: false, abort: null, key: '', model: 'auto', saveKey: false, loaded: false, stage: '' };
 
   async function loadSettings() {
     if (st.loaded) return;
     st.key = (await ctx.getSetting('anthropicApiKey', '')) || '';
     st.saveKey = !!st.key;
-    st.model = (await ctx.getSetting('anthropicModel', MODELS[0].id)) || MODELS[0].id;
+    st.model = planOf((await ctx.getSetting('anthropicModel', 'auto')) || 'auto').id; // 以前のモデルの設定は、近い組み合わせに
     st.loaded = true;
   }
 
@@ -52,7 +53,7 @@ export function createAiView(ctx) {
     const hist = history();
     const msgs = hist.map((h) => (h.role === 'user'
       ? `<div class="ai-msg user">${esc(h.text)}</div>`
-      : `<div class="ai-msg assistant">${esc(h.reply || '')}${h.questions?.length ? `<div class="ai-q"><b>確認したいこと</b><ul>${h.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}${h.usage ? `<small class="note">入力 ${h.usage.input_tokens}・出力 ${h.usage.output_tokens} トークン（${esc(h.model || '')}）</small>` : h.pasted ? '<small class="note">claude.ai の返答を貼り付け</small>' : ''}</div>`)).join('');
+      : `<div class="ai-msg assistant">${esc(h.reply || '')}${h.questions?.length ? `<div class="ai-q"><b>確認したいこと</b><ul>${h.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}${h.calls ? `<small class="note">${esc(usageText(h.calls))}${h.check ? `・端末の検査: ${h.check.errors.length ? `誤り ${h.check.errors.length} 件が残っています（${esc(h.check.errors.slice(0, 3).join('／'))}）` : 'エラーなし'}` : ''}${h.repaired ? `・修理 ${h.repaired} 回` : ''}</small>` : h.usage ? `<small class="note">入力 ${h.usage.input_tokens}・出力 ${h.usage.output_tokens} トークン（${esc(h.model || '')}）</small>` : h.pasted ? '<small class="note">claude.ai の返答を貼り付け</small>' : ''}</div>`)).join('');
     const last = latest();
     const hasCircuit = p.schematic.sheets[0].components.length > 0;
     ctx.root.innerHTML = `<div class="ai-wrap">
@@ -60,7 +61,8 @@ export function createAiView(ctx) {
       <details class="ai-settings" ${st.key ? '' : 'open'}><summary>${summaryText()}</summary>
         <label class="field"><span>Anthropic API キー</span><input type="password" id="ai-key" autocomplete="off" placeholder="sk-ant-..." value="${esc(st.key)}"></label>
         <label class="opt"><input type="checkbox" id="ai-save" ${st.saveKey ? 'checked' : ''}> この端末に保存する（保存しなければアプリを閉じると消えます）</label>
-        <label class="field"><span>モデル</span><select id="ai-model">${MODELS.map((m) => `<option value="${m.id}" ${m.id === st.model ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>
+        <label class="field"><span>モデル（段階ごとの使い分け）</span><select id="ai-model">${Object.entries(PLANS).map(([id, m]) => `<option value="${id}" ${id === st.model ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>
+        <p class="note">自動: 回路の設計は Opus、端末の検査（形式・ERC）で見つかった誤りの修理は Sonnet、長くなった会話の要約は Haiku。指示文はキャッシュし、前の回路は送り直さず、小さな直しは差分で受け取ります。</p>
         <p class="note">キーは Anthropic のコンソール（platform.claude.com）で作れます。料金は使った分だけキーの持ち主に請求されます。キーはこの端末からAnthropicへ直接送られ、ほかには送りません。キーが無くても、下の「claude.ai 用にコピー」で Claude のアプリに頼めます。</p>
       </details>
       <div class="ai-log">${msgs || `<p class="note">作りたい回路を書いてください。例:「USB-C から 5V を受けて 3.3V を作り、ESP32-S3 で I2C の温湿度センサーを読む。状態表示の LED を1個」${hasCircuit ? '<br>今の回路図を添えて送るので「この回路に〜を追加して」のような修正も頼めます。' : ''}</p>`}</div>
@@ -69,7 +71,7 @@ export function createAiView(ctx) {
         <textarea id="ai-text" rows="3" placeholder="目的・条件・追加の指示">${esc(st.draft || '')}</textarea>
         <div class="check-card-actions">
           <button class="btn primary" data-send ${st.busy ? 'disabled' : ''}>${st.busy ? '考え中…' : 'Claude に送る'}</button>
-          ${st.busy ? '<button class="btn" data-abort>中止</button>' : ''}
+          ${st.busy ? `<button class="btn" data-abort>中止</button><small class="note ai-busy">${esc(st.stage ? `${st.stage}中…` : '')}</small>` : ''}
           <button class="btn" data-copy>claude.ai 用にコピー</button>
           <button class="btn" data-paste>返答を貼り付け</button>
           ${hist.length ? '<button class="btn" data-clear>会話を消す</button>' : ''}
@@ -82,7 +84,7 @@ export function createAiView(ctx) {
   }
 
   function summaryText() {
-    return `接続の設定（${st.key ? `API キー設定済み・${esc(MODELS.find((m) => m.id === st.model)?.label || st.model)}` : 'API キー未設定'}）`;
+    return `接続の設定（${st.key ? `API キー設定済み・${esc(PLANS[st.model]?.label || st.model)}` : 'API キー未設定'}）`;
   }
   function summary() {
     const el = ctx.root.querySelector('.ai-settings summary');
@@ -102,7 +104,7 @@ export function createAiView(ctx) {
     $('[data-abort]')?.addEventListener('click', () => st.abort?.abort());
     $('[data-copy]').onclick = () => copyPrompt();
     $('[data-paste]').onclick = () => pasteAnswer();
-    $('[data-clear]')?.addEventListener('click', () => { ctx.mutate((q) => { q.ai = { ...(q.ai || {}), history: [] }; }, 'ai'); render(); });
+    $('[data-clear]')?.addEventListener('click', () => { ctx.mutate((q) => { q.ai = { ...(q.ai || {}), history: [], summary: null }; }, 'ai'); render(); });
     ctx.root.querySelectorAll('[data-apply]').forEach((b) => { b.onclick = () => apply(b.dataset.apply); });
   }
 
@@ -111,32 +113,29 @@ export function createAiView(ctx) {
     return p.schematic.sheets[0].components.length ? exportSpec(p) : null;
   }
 
-  /** API に送る会話（最初の依頼に今の回路を添え、AI の返答は JSON のまま返す） */
-  function apiMessages(text) {
-    const msgs = [];
-    let first = true;
-    for (const h of history()) {
-      if (h.role === 'user') { msgs.push({ role: 'user', content: first ? userMessage(h.text, h.context) : h.text }); first = false; }
-      else msgs.push({ role: 'assistant', content: JSON.stringify({ reply: h.reply || '', questions: h.questions || [], circuit: h.circuit }) });
-    }
-    msgs.push({ role: 'user', content: first ? userMessage(text, currentSpec()) : text });
-    return msgs;
-  }
-
   async function send() {
     const text = (st.draft || '').trim();
     if (!text) { ctx.toast('依頼を書いてください', true); return; }
     if (!st.key) { ctx.toast('API キーを設定するか、「claude.ai 用にコピー」を使ってください', true); return; }
     const isFirst = !history().length;
-    const messages = apiMessages(text);
+    const prev = history();
+    // 今の回路: 直前の AI の回路をまだ回路図にしていなければそれ、回路図にした後は回路図（手で直した分も入る）
+    const l = latest();
+    const base = (l && !l.applied ? l.circuit : currentSpec()) || l?.circuit || null;
     ctx.mutate((q) => { q.ai = { ...(q.ai || {}), history: [...(q.ai?.history || []), { role: 'user', text, at: Date.now(), ...(isFirst ? { context: currentSpec() } : {}) }] }; }, 'ai');
     st.draft = '';
     st.busy = true; st.abort = new AbortController();
     render();
     try {
-      const r = await callClaude({ apiKey: st.key, model: st.model, system: systemPrompt({ layers: layerCount(ctx.getProject()) }), messages, schema: RESPONSE_SCHEMA, signal: st.abort.signal });
-      const a = unwrap(r.json);
-      ctx.mutate((q) => { q.ai.history.push({ role: 'assistant', ...a, usage: r.usage, model: st.model, at: Date.now() }); }, 'ai');
+      const r = await designTurn({
+        apiKey: st.key, plan: planOf(st.model), system: systemPrompt({ layers: layerCount(ctx.getProject()) }),
+        history: prev, summary: ctx.getProject().ai?.summary || null, request: text, currentSpec: base, signal: st.abort.signal,
+        onStage: (stage, model) => { st.stage = `${{ design: '設計', repair: '検査の誤りを修理', compact: '会話を要約' }[stage]}（${model}）`; const el = ctx.root.querySelector('.ai-busy'); if (el) el.textContent = `${st.stage}中…`; },
+      });
+      ctx.mutate((q) => {
+        q.ai.history.push({ role: 'assistant', reply: r.reply, questions: r.questions, circuit: r.circuit, mode: r.mode, calls: r.calls, check: r.check, repaired: r.repaired || 0, fixes: r.fixes, model: st.model, at: Date.now() });
+        if (r.summary) q.ai.summary = r.summary;
+      }, 'ai');
     } catch (e) {
       ctx.toast(e instanceof ClaudeError ? e.message : `失敗しました: ${e.message || e}`, true);
       // 失敗した依頼は会話から外し、入力欄に戻す
@@ -180,6 +179,12 @@ export function createAiView(ctx) {
       if (ok !== 'ok') return;
     }
     await ctx.applySpec(c, mode);
+    // 回路図にした印（以後の依頼は回路図を基準にする）
+    ctx.mutate((q) => {
+      const h = [...(q.ai?.history || [])];
+      for (let i = h.length - 1; i >= 0; i--) if (h[i].role === 'assistant' && h[i].circuit) { h[i] = { ...h[i], applied: true }; break; }
+      q.ai = { ...(q.ai || {}), history: h };
+    }, 'ai');
   }
 
   return {

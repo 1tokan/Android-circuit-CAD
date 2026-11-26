@@ -32,7 +32,8 @@ test('サンプル: .kicad_pcb の中身の数がプロジェクトと一致す�
   assert.ok(balanced(t), '括弧が対応している');
   const count = (re) => (t.match(re) || []).length;
   assert.equal(count(/^ {2}\(footprint "PocketEDA:(?!MountingHole_NPTH)/gm), pcb.footprints.length);
-  assert.equal(count(/^ {2}\(footprint "PocketEDA:MountingHole_NPTH_[\d.]+mm"/gm), pcb.holes.length);
+  assert.equal(count(/^ {2}\(footprint "PocketEDA:MountingHole_NPTH_[\d.]+mm(_Keepout[\d.]+mm)?"/gm), pcb.holes.length);
+  assert.equal(count(/^ {4}\(zone \(net 0\)/gm), pcb.holes.filter((h) => h.keepout).length, "ネジの頭の範囲の keepout");
   assert.equal(count(/^ {2}\(segment /gm), pcb.tracks.length);
   assert.equal(count(/^ {2}\(via /gm), pcb.vias.length);
   assert.equal(count(/^ {2}\(zone /gm), pcb.zones.length);

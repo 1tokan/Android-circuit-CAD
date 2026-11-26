@@ -1,7 +1,7 @@
 // PCB レイアウトエディタ（操作・UI）
 // データの変更は必ず ctx.edit(fn, label) を通す（PCB用の元に戻す履歴と自動保存に乗せる）
 import {
-  ensurePcb, toNm, toMm, arrangeInBoard, copperLayers, layerName, fpBox, boardRect, routePath, snapMm, addTrackPath, addVia, addBoardZone, addText, addHole, setOutlineRect,
+  ensurePcb, toNm, toMm, arrangeInBoard, copperLayers, layerName, fpBox, boardRect, routePath, snapMm, addTrackPath, addVia, addBoardZone, addText, addHole, setOutlineRect, addCornerHoles, SCREW_HOLES,
   hitTest, itemsInRect, moveSelection, rotateSelection, flipSelection, deleteSelection, findItem, boardSizeText, importNetlist,
 } from './model.js';
 import { computePcbConnectivity, snapTarget } from './connectivity.js';
@@ -10,6 +10,9 @@ import { autoroute } from './autoroute.js';
 import { placeRefdes, refdesConflicts } from './shapes.js';
 import { addStitchVias, planeSplitCrossings } from './stitch.js';
 import { closeViaPairs, mergeCloseVias } from './viafix.js';
+import { fixStarvedThermals, starvedPads } from './thermalfix.js';
+import { repairUnrouted } from './routefix.js';
+import { cachedFills } from './zonefill.js';
 import { netWidthFor, currentSettings } from '../check/current.js';
 import { renderPcb } from './render.js';
 import { esc } from '../core/util.js';
@@ -108,6 +111,9 @@ export function createPcbEditor(ctx) {
       if (!outside && !st.conn?.unrouted && pcb().zones.some((z) => z.net === 'GND' && (z.layer === 'F.Cu' || z.layer === 'B.Cu'))) c.push(chip('stitch', 'GND のつなぎビア'));
       const closeVias = outside ? 0 : closeViaPairs(pcb(), drcRules(ctx.getProject())).length;
       if (closeVias) c.push(chip('viamerge', `近すぎるビアをまとめる（${closeVias}）`, true));
+      // サーマルのスポークが足りないパッド（KiCad の starved thermal）。ふさいでいる配線を引き直す
+      const starved = outside || st.conn?.unrouted || !pcb().zones.length ? 0 : starvedPads(pcb(), drcRules(ctx.getProject()), cachedFills(pcb(), drcRules(ctx.getProject()), { allowStale: true }).fills).length;
+      if (starved) c.push(chip('thermalfix', `スポーク不足を直す（${starved}）`, true));
       c.push(chip('multi', st.multi ? '複数選択 ON' : '複数選択', st.multi), layerChip);
       if (st.sel.size) c.push(chip('props', '属性'), chip('rotate', '回転'), chip('flip', '裏返す'), chip('delete', '削除'), chip('clear', '解除'));
       c.push(info);
@@ -120,7 +126,7 @@ export function createPcbEditor(ctx) {
     } else if (st.tool === 'zone') {
       c.push(layerChip, `<span class="chip-info hint">基板をタップしてベタ（塗りつぶし）を作成</span>`);
     } else if (st.tool === 'outline') {
-      c.push(chip('size', `基板サイズ ${boardSizeText(pcb())}`), chip('hole', st.holeMode ? '取付穴: タップで配置' : '取付穴を追加', st.holeMode));
+      c.push(chip('size', `基板サイズ ${boardSizeText(pcb())}`), chip('hole', st.holeMode ? '取付穴: タップで配置' : '取付穴を追加', st.holeMode), chip('cornerholes', '四隅に取付穴'));
     } else if (st.tool === 'text') {
       c.push(layerChip, `<span class="chip-info hint">タップした位置にシルク文字（${st.layer === 'F.Cu' ? '表' : '裏'}）</span>`);
     }
@@ -162,6 +168,8 @@ export function createPcbEditor(ctx) {
         ctx.ui.toast(r.kept.length ? `${r.merged} 組をまとめました。${r.kept.length} 組は周りが狭くまとめられません（DRC の位置を確認して手で直してください）` : `近すぎるビアを ${r.merged} 組まとめました`, !!r.kept.length);
         break;
       }
+      case 'thermalfix': await thermalFix(); break;
+      case 'cornerholes': await cornerHolesDialog(); break;
       case 'multi': st.multi = !st.multi; break;
       case 'layer': st.layer = nextLayer(); break;
       case 'props': await editProps(); break;
@@ -354,12 +362,14 @@ export function createPcbEditor(ctx) {
       <label class="field"><span>信号の線幅 (mm)</span><input type="text" name="w" inputmode="decimal" value="${sigW}"></label>
       <label class="field"><span>電源・GND の線幅 (mm)</span><input type="text" name="pw" inputmode="decimal" value="0.3"></label>
       ${Object.keys(currentSettings(ctx.getProject()).nets).length ? `<p class="note">電流を設定したネット（${Object.keys(currentSettings(ctx.getProject()).nets).map(esc).join('・')}）は、電流から求めた幅で引きます（検査 →「電流」）。</p>` : ''}
+      <label class="field check"><input type="checkbox" name="repair" checked> 引けなかった接続は、邪魔な配線をはがして引き直す</label>
       <p class="note">まだつながっていない接続（未配線 ${st.conn?.unrouted ?? 0} 本）を、設計ルールの間隔を守って引きます。今ある配線・ビアは動かしません。引けなかった接続は一覧で知らせます（部品を動かすか手で引いてください）。終わったら「元に戻す」で取り消せます。内層のベタ（GND・電源の面）へはビアでつながっていれば配線済みとみなします。</p>
     </div>`;
     const r = await ctx.ui.ask('自動配線', html, [{ label: 'キャンセル', value: '' }, { label: '配線する', value: 'ok', cls: 'primary' }]);
     if (r !== 'ok') return;
     const layers = $('#dialog-body [name="layers"]').value.split(',');
     const w = Number($('#dialog-body [name="w"]').value), pw = Number($('#dialog-body [name="pw"]').value);
+    const repair = $('#dialog-body [name="repair"]').checked;
     if (!(w >= rules.minTrackWidthMm) || !(pw >= w)) { ctx.ui.toast(`線幅は ${rules.minTrackWidthMm}mm 以上、電源は信号以上にしてください`, true); return; }
     routing = true;
     const work = structuredClone({ ...b });
@@ -368,7 +378,14 @@ export function createPcbEditor(ctx) {
     try {
       ctx.ui.toast('自動配線中…');
       const prj = ctx.getProject();
-      res = await autoroute(work, rules, { layers, trackWidth: w, powerWidth: pw, netWidth: (n) => Math.max(0, ...layers.map((l) => netWidthFor(prj, n, l))), yieldEvery: 2, onProgress: (d, n) => { if (Date.now() - t0 > 400) ctx.ui.toast(`自動配線中… ${d}/${n}`); } });
+      const opts = { layers, trackWidth: w, powerWidth: pw, netWidth: (n) => Math.max(0, ...layers.map((l) => netWidthFor(prj, n, l))), yieldEvery: 2 };
+      res = await autoroute(work, rules, { ...opts, onProgress: (d, n) => { if (Date.now() - t0 > 400) ctx.ui.toast(`自動配線中… ${d}/${n}`); } });
+      // 引けなかった接続は、邪魔な配線をはがして順番を変えて引き直す（全部引けたときだけ採用）
+      if (res.failed.length && repair) {
+        ctx.ui.toast(`引けなかった ${res.failed.length} 本を引き直しています…`);
+        const rr = await repairUnrouted(work, rules, res.failed, { route: opts, tries: 6 });
+        res.failed = rr.failed;
+      }
     } catch (e) {
       routing = false;
       ctx.ui.toast(`自動配線に失敗しました: ${e.message}`, true);
@@ -382,6 +399,40 @@ export function createPcbEditor(ctx) {
       const list = res.failed.map((f) => `<li>${esc(f.net)}: ${esc(f.a)} → ${esc(f.b)}</li>`).join('');
       await ctx.ui.ask('自動配線の結果', `<p>${res.routed.length} 本引きました（ビア ${res.vias} 個・${sec} 秒）。引けなかった接続が ${res.failed.length} 本あります。</p><ul class="plain">${list}</ul><p class="note">周りの部品を少し離すか、別の層を選んで、もう一度実行してください。</p>`, [{ label: '閉じる', value: '' }]);
     } else ctx.ui.toast(`${res.routed.length} 本を引きました（ビア ${res.vias} 個・${sec} 秒）。検査（DRC）で確認してください`);
+  }
+
+  /** スポーク不足のパッドについて、通り道をふさぐ配線をはがして引き直す（良くならなければ元のまま） */
+  async function thermalFix() {
+    if (routing) return;
+    const prj = ctx.getProject(), rules = drcRules(prj);
+    routing = true;
+    const work = structuredClone({ ...pcb() });
+    let r;
+    try {
+      ctx.ui.toast('スポークの通り道を空けて引き直しています…');
+      const layers = copperLayers(work).filter((l) => l === 'F.Cu' || l === 'B.Cu');
+      r = await fixStarvedThermals(work, rules, { rounds: 4, route: { layers, powerWidth: 0.15, netWidth: (n) => Math.max(0, ...layers.map((l) => netWidthFor(prj, n, l))), yieldEvery: 4 } });
+    } catch (e) {
+      routing = false;
+      ctx.ui.toast(`引き直しに失敗しました: ${e.message}`, true);
+      return;
+    }
+    routing = false;
+    if (r.after < r.before) edit((p) => { p.tracks = work.tracks; p.vias = work.vias; }, 'スポーク不足を直す');
+    ctx.ui.toast(r.after ? `スポーク不足 ${r.before} → ${r.after} か所。残りは部品の間が狭く通り道が取れません（部品を少し離すか、その部品を「ベタとのつなぎ方: 直結」に）` : `スポーク不足 ${r.before} か所を直しました（引き直したネット: ${r.rerouted.join('・')}）`, !!r.after);
+    render();
+  }
+
+  async function cornerHolesDialog() {
+    const opts = Object.entries(SCREW_HOLES).map(([k, v]) => `<option value="${k}" ${k === 'M3' ? 'selected' : ''}>${k}（穴 ${v.drillMm}mm・頭の範囲 φ${v.keepoutMm}）</option>`).join('');
+    const r = await ctx.ui.ask('四隅に取付穴', `<div class="form"><label class="field"><span>ネジ</span><select name="screw">${opts}</select></label>
+      <p class="note">長方形の基板の四隅に、非メッキの取付穴を置きます。穴の中心は角から「ネジの頭の範囲の半径 ＋ 0.5mm」。頭の範囲には配線・ビア・ベタ・部品を置きません（DRC・自動配線・ベタ・KiCad 書き出しで同じ範囲）。</p></div>`,
+    [{ label: 'キャンセル', value: '' }, { label: '置く', value: 'ok', cls: 'primary' }]);
+    if (r !== 'ok') return;
+    const screw = $('#dialog-body [name="screw"]').value;
+    let added = [];
+    edit((p) => { added = addCornerHoles(p, { screw }); }, '四隅の取付穴');
+    ctx.ui.toast(added.length ? `${screw} の取付穴を ${added.length} 個置きました。DRC で部品・配線との間隔を確認してください` : '四隅には既に取付穴があります');
   }
 
   // ---------------- その他のツール ----------------
@@ -468,6 +519,7 @@ export function createPcbEditor(ctx) {
       html = f('x', 'X (mm)', toMm(o.x)) + f('y', 'Y (mm)', toMm(o.y)) + f('rot', '回転 (°)', o.rot || 0) +
         `<label class="field"><span>実装面</span><select name="side"><option value="top" ${o.side !== 'bottom' ? 'selected' : ''}>表</option><option value="bottom" ${o.side === 'bottom' ? 'selected' : ''}>裏</option></select></label>` +
         `<label class="field check"><input type="checkbox" name="locked" ${o.locked ? 'checked' : ''}> 位置をロック</label>` +
+        `<label class="field"><span>ベタとのつなぎ方</span><select name="zoneConnect"><option value="" ${o.zoneConnect !== 'solid' ? 'selected' : ''}>サーマル（スポーク）</option><option value="solid" ${o.zoneConnect === 'solid' ? 'selected' : ''}>直結（IC・放熱用。小さいチップ部品は立ち上がりやすい）</option></select></label>` +
         `<p class="note">値: ${esc(o.value)}${o.lcsc ? `・LCSC ${esc(o.lcsc)}` : ''}${o.fpDef.generated ? '・フットプリントは推定（要確認）' : ''}</p>`;
     } else if (k === 't') {
       title = `配線（${o.net || 'ネットなし'}）`;
@@ -480,7 +532,7 @@ export function createPcbEditor(ctx) {
       html = f('text', '文字', o.text, '') + f('size', '文字高さ (mm)', toMm(o.size)) + f('rot', '回転 (°)', o.rot || 0);
     } else if (k === 'h') {
       title = '取付穴';
-      html = f('drill', '直径 (mm)', toMm(o.drill));
+      html = f('drill', '直径 (mm)', toMm(o.drill)) + f('keepout', 'ネジの頭の範囲の直径 (mm、0 = なし)', o.keepout ? toMm(o.keepout) : 0) + '<p class="note">頭の範囲には配線・ビア・ベタ・部品を置きません（M3 なら 6.0 が目安）。</p>';
     } else if (k === 'z') {
       title = `ベタ（${o.net}・${o.layer === 'F.Cu' ? '表' : '裏'}）`;
       html = f('clearance', '他ネットとのクリアランス (mm)', toMm(o.clearance));
@@ -492,11 +544,11 @@ export function createPcbEditor(ctx) {
     try {
       edit((b) => {
         const x = findItem(b, key);
-        if (k === 'f') { x.x = toNm(num('x', -1000, 1000)); x.y = toNm(num('y', -1000, 1000)); x.rot = ((num('rot', -360, 360) % 360) + 360) % 360; x.side = v('side').value; x.locked = v('locked').checked; }
+        if (k === 'f') { x.x = toNm(num('x', -1000, 1000)); x.y = toNm(num('y', -1000, 1000)); x.rot = ((num('rot', -360, 360) % 360) + 360) % 360; x.side = v('side').value; x.locked = v('locked').checked; if (v('zoneConnect').value === 'solid') x.zoneConnect = 'solid'; else delete x.zoneConnect; }
         if (k === 't') { x.width = toNm(num('width', 0.05, 10)); x.layer = v('layer').value; }
         if (k === 'v') { const d = num('diameter', 0.2, 5), h = num('drill', 0.1, 4); if (h >= d) throw new Error('穴径は外径より小さくしてください'); x.diameter = toNm(d); x.drill = toNm(h); }
         if (k === 'x') { x.text = v('text').value; x.size = toNm(num('size', 0.3, 10)); x.rot = ((num('rot', -360, 360) % 360) + 360) % 360; }
-        if (k === 'h') x.drill = toNm(num('drill', 0.3, 10));
+        if (k === 'h') { x.drill = toNm(num('drill', 0.3, 10)); const kp = num('keepout', 0, 20); if (kp > toMm(x.drill)) x.keepout = toNm(kp); else delete x.keepout; }
         if (k === 'z') x.clearance = toNm(num('clearance', 0.1, 5));
       }, '属性');
     } catch (e) { ctx.ui.toast(e.message, true); }

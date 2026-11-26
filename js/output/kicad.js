@@ -8,10 +8,10 @@
 
 import { numFmt, q, uuidFrom } from './sexpr.js';
 import { toMm, copperLayers, boardToFp, padLayers } from '../pcb/model.js';
-import { silkSegments, refdesPos, pin1Mark } from '../pcb/shapes.js';
+import { silkSegments, boardSilkSegments, refdesPos, pin1Mark } from '../pcb/shapes.js';
 
 import { strokeWidthFor, SILK_LINE_MM } from '../pcb/text.js';
-import { ZONE_DEFAULTS } from '../pcb/zonefill.js';
+import { ZONE_DEFAULTS, cachedFills } from '../pcb/zonefill.js';
 import { drcRules } from '../check/rules.js';
 import { getFootprint } from '../library/footprints.js';
 import { buildSymbols, kicadSch, kicadSymLib, kicadNetNames, SYM_LIB } from './kicad-sch.js';
@@ -87,7 +87,7 @@ const PAD_SHAPE = { rect: 'rect', roundrect: 'roundrect', oval: 'oval', circle: 
  * @param libMode true: ライブラリ用（原点・表面・ネットなし・ファイルの先頭の形）
  */
 function footprintSexpr(inst, nets, cu, ctx = {}, libMode = false) {
-  const def = inst.fpDef;
+  const def = (!libMode && ctx.defFor?.(inst)) || inst.fpDef; // 基板の端で外形線を切った部品は、切った形のライブラリ（def.silk）
   const bottom = inst.side === 'bottom';
   const F = bottom ? 'B' : 'F';
   const a = -(inst.rot || 0) + (bottom ? 180 : 0);
@@ -115,6 +115,8 @@ function footprintSexpr(inst, nets, cu, ctx = {}, libMode = false) {
   }
   const tht = def.pads.some((p) => p.type === 'tht');
   out.push(`    (attr ${tht ? 'through_hole' : 'smd'}${inst.dnp ? ' exclude_from_pos_files exclude_from_bom' : ''})`);
+  // ベタとのつなぎ方を部品ごとに直結にしたもの（IC など。KiCad の部品の「ゾーン接続: ベタ塗り」）
+  if (!libMode && inst.zoneConnect === 'solid') out.push('    (zone_connect 2)');
   // 部品番号（シルク）と値（Fab 層）。文字は基板に対して水平（角度 0）
   const rp = refdesPos(inst);
   const rl = toKicadLocal(inst, rp.x, rp.y - rp.size / 2); // refdesPos はベースライン → KiCad は文字の中心
@@ -129,7 +131,7 @@ function footprintSexpr(inst, nets, cu, ctx = {}, libMode = false) {
   out.push(`      (tstamp ${id('val')})`);
   out.push('    )');
   // シルクの外形線（パッドにかかる部分は切り取り済み）
-  silkSegments(def).forEach((s, i) => {
+  (def.silk || silkSegments(def)).forEach((s, i) => {
     const p = localK(inst, s.a.x, s.a.y), r = localK(inst, s.b.x, s.b.y);
     out.push(`    (fp_line (start ${n(p.x)} ${n(p.y)}) (end ${n(r.x)} ${n(r.y)}) (stroke (width ${n(SILK_LINE_MM)}) (type solid)) (layer ${q(`${F}.SilkS`)}) (tstamp ${id(`silk${i}`)}))`);
   });
@@ -161,6 +163,8 @@ function footprintSexpr(inst, nets, cu, ctx = {}, libMode = false) {
     }
     if (shape === 'roundrect') s += ` (roundrect_rratio ${n(pad.rr ?? 0.25)})`;
     if (net) s += ` ${net}`;
+    // サーマルのスポークの向き: Pocket EDA はパッドの縦横（KiCad の 90°）。縦横がふさがったパッドだけ斜め（45°）
+    if (!libMode) s += ` (thermal_bridge_angle ${ctx.spokeAngle?.(inst, pad.num) === 45 ? 45 : 90})`;
     s += ` (tstamp ${id(`pad${k}`)}))`;
     out.push(s);
   });
@@ -176,19 +180,37 @@ function footprintSexpr(inst, nets, cu, ctx = {}, libMode = false) {
 }
 
 /** 取付穴（非メッキ）は KiCad では穴だけの部品として置く。ライブラリの名前は穴径ごと */
-export const holeName = (h) => `MountingHole_NPTH_${n(toMm(h.drill))}mm`;
+export const holeName = (h) => `MountingHole_NPTH_${n(toMm(h.drill))}mm${h.keepout ? `_Keepout${n(toMm(h.keepout))}mm` : ''}`;
 function holeSexpr(h, i, libMode = false) {
-  const d = toMm(h.drill);
+  const d = toMm(h.drill), k = h.keepout ? toMm(h.keepout) : 0;
   const name = holeName(h);
+  const descr = `取付穴（非メッキ）${n(d)}mm${k ? `・ネジの頭の範囲 φ${n(k)}mm（銅を置かない）` : ''}`;
   const head = libMode
-    ? [`  (footprint ${q(name)} (version ${KICAD_PCB_VERSION}) (generator pocket_eda) (layer "F.Cu")`, `    (descr ${q(`取付穴（非メッキ）${n(d)}mm`)})`]
-    : [`  (footprint ${q(`${FP_LIB}:${name}`)} (layer "F.Cu")`, `    (tstamp ${uuidFrom(h.id || `hole${i}`)})`, `    (at ${n(toMm(h.x))} ${n(toMm(h.y))})`, `    (descr ${q(`取付穴（非メッキ）${n(d)}mm`)})`];
+    ? [`  (footprint ${q(name)} (version ${KICAD_PCB_VERSION}) (generator pocket_eda) (layer "F.Cu")`, `    (descr ${q(descr)})`]
+    : [`  (footprint ${q(`${FP_LIB}:${name}`)} (layer "F.Cu")`, `    (tstamp ${uuidFrom(h.id || `hole${i}`)})`, `    (at ${n(toMm(h.x))} ${n(toMm(h.y))})`, `    (descr ${q(descr)})`];
+  // ネジの頭の範囲: 部品外形枠（F.CrtYd・B.CrtYd）の円と、全銅層の keepout（配線・ビア・ベタを置かない。KiCad の塗りもこの円を避ける）
+  const ring = [];
+  if (k) {
+    const NSEG = 32, R = k / 2 / Math.cos(Math.PI / NSEG); // 内接させない（外接多角形）
+    // 部品の中のゾーンの座標は、.kicad_pcb では基板の座標、.kicad_mod では部品の原点からの座標
+    const ox = libMode ? 0 : toMm(h.x), oy = libMode ? 0 : toMm(h.y);
+    const pts = Array.from({ length: NSEG }, (_, j) => `(xy ${n(ox + R * Math.cos((2 * Math.PI * j) / NSEG))} ${n(oy + R * Math.sin((2 * Math.PI * j) / NSEG))})`).join(' ');
+    for (const L of ['F.CrtYd', 'B.CrtYd']) ring.push(`    (fp_circle (center 0 0) (end ${n(k / 2)} 0) (stroke (width 0.05) (type solid)) (fill none) (layer ${q(L)}) (tstamp ${uuidFrom(`${h.id}:${L}`)}))`);
+    ring.push(`    (zone (net 0) (net_name "") (layers "*.Cu") (tstamp ${uuidFrom(`${h.id}:keepout`)}) (hatch edge 0.5)`,
+      '      (connect_pads (clearance 0))',
+      '      (min_thickness 0.25) (filled_areas_thickness no)',
+      '      (keepout (tracks not_allowed) (vias not_allowed) (pads allowed) (copperpour not_allowed) (footprints allowed))',
+      '      (fill (thermal_gap 0.5) (thermal_bridge_width 0.5))',
+      `      (polygon (pts ${pts}))`,
+      '    )');
+  }
   return [
     ...head,
     '    (attr exclude_from_pos_files exclude_from_bom)',
-    `    (fp_text reference ${q(libMode ? 'REF**' : `H${i + 1}`)} (at 0 ${n(-d / 2 - 1)}) (layer "F.SilkS") hide (effects (font (size 1 1) (thickness 0.15))) (tstamp ${uuidFrom(`${h.id}:ref`)}))`,
-    `    (fp_text value ${q(name)} (at 0 ${n(d / 2 + 1)}) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))) (tstamp ${uuidFrom(`${h.id}:val`)}))`,
+    `    (fp_text reference ${q(libMode ? 'REF**' : `H${i + 1}`)} (at 0 ${n(-Math.max(d, k) / 2 - 1)}) (layer "F.SilkS") hide (effects (font (size 1 1) (thickness 0.15))) (tstamp ${uuidFrom(`${h.id}:ref`)}))`,
+    `    (fp_text value ${q(name)} (at 0 ${n(Math.max(d, k) / 2 + 1)}) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))) (tstamp ${uuidFrom(`${h.id}:val`)}))`,
     `    (pad "" np_thru_hole circle (at 0 0) (size ${n(d)} ${n(d)}) (drill ${n(d)}) (layers "*.Cu" "*.Mask") (tstamp ${uuidFrom(`${h.id}:pad`)}))`,
+    ...ring,
     '  )',
   ].join('\n');
 }
@@ -205,7 +227,10 @@ export function kicadPcb(project, opt = {}) {
   const cu = copperLayers(nCu);
   const R = drcRules(project);
   const fab = project.board?.fab || {};
-  const ctx = opt.ctx || {};
+  // パッドごとのスポークの向き（Pocket EDA のベタの計算で斜めにしたパッド）
+  const angles = new Map();
+  for (const f of cachedFills(pcb, R).fills.values()) for (const sc of f.spokeCount || []) if (sc.angle === 45) angles.set(`${sc.ref}:${sc.pad}`, 45);
+  const ctx = { ...(opt.ctx || {}), spokeAngle: (inst, num) => angles.get(`${inst.ref}:${num}`) };
   const nets = netTable(pcb, ctx.netNames || null);
   const L = [];
   L.push(`(kicad_pcb (version ${KICAD_PCB_VERSION}) (generator pocket_eda)`);
@@ -360,7 +385,7 @@ export function kicadDru(project) {
 }
 
 /** フットプリントの形の比較用（名前が同じでも形が違えば別のライブラリ部品にする） */
-const fpKey = (def) => JSON.stringify([def.pads, def.npth || null, def.body || null, def.courtyard || null]);
+const fpKey = (def) => JSON.stringify([def.pads, def.npth || null, def.body || null, def.courtyard || null, def.silk || null]);
 
 /**
  * KiCad 一式（ZIP に入れるファイル）
@@ -378,20 +403,27 @@ export function kicadFiles(project, { version = '' } = {}) {
   const libName = (def) => {
     const k = fpKey(def);
     if (nameOf.has(k)) return nameOf.get(k);
-    const b = safeName(def.kicad || def.name || def.id);
+    const b = safeName(def.kicad || def.name || def.id) + (def.silk ? '_EdgeCut' : '');
     let nm = b;
     for (let i = 2; lib.has(nm); i++) nm = `${b}_${i}`;
     lib.set(nm, def); nameOf.set(k, nm);
     return nm;
   };
-  for (const f of pcb.footprints) libName(f.fpDef);
+  // 基板の端からはみ出す部品の外形線は、Gerber と同じく基板の内側で切る（切った形を別のライブラリ部品にする。KiCad のライブラリ照合で差が出ない）
+  const edgeDef = new Map();
+  for (const f of pcb.footprints) {
+    const r = boardSilkSegments(pcb, f);
+    if (r.clipped) edgeDef.set(f.id, { ...f.fpDef, silk: r.segs });
+  }
+  const defFor = (inst) => edgeDef.get(inst.id) || inst.fpDef;
+  for (const f of pcb.footprints) libName(defFor(f));
   // 回路図とシンボル
   const built = buildSymbols(project);
   const nlById = new Map(built.nl.components.map((c) => [c.compId, c]));
   const instByComp = new Map(pcb.footprints.filter((f) => f.compId).map((f) => [f.compId, f]));
   const fpLibId = (compId) => {
     const inst = instByComp.get(compId);
-    const def = inst?.fpDef || (nlById.get(compId)?.footprint ? getFootprint(nlById.get(compId).footprint) : null);
+    const def = (inst && defFor(inst)) || (nlById.get(compId)?.footprint ? getFootprint(nlById.get(compId).footprint) : null);
     return def ? `${FP_LIB}:${libName(def)}` : '';
   };
   const sch = kicadSch(project, built, { projectName: base, fpLibId, version });
@@ -404,6 +436,7 @@ export function kicadFiles(project, { version = '' } = {}) {
   const sheetComps = new Set(project.schematic.sheets[0].components.map((c) => c.id));
   const ctx = {
     libName,
+    defFor,
     model: (nm) => (models.has(nm) ? `\${KIPRJMOD}/${FP_LIB}.3dshapes/${nm}.wrl` : null),
     symPath: (inst) => (inst.compId && sheetComps.has(inst.compId) ? `/${sch.symbolUuid(inst.compId)}` : null),
     sheetfile: `${base}.kicad_sch`,

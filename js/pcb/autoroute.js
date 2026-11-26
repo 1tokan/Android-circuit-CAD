@@ -8,7 +8,7 @@
 // - 実行前からある配線・ビアには手を付けない
 // 単位: mm（基板座標）。PCB には nm で書き込む。
 
-import { allPads, pointInPad, toMm, toNm, boardRect, copperLayers, padHole, addTrackPath, addVia, boardHoles } from './model.js';
+import { allPads, pointInPad, toMm, toNm, boardRect, copperLayers, padHole, addTrackPath, addVia, boardHoles, holeClearRadiusMm, fpToBoard } from './model.js';
 import { mergeCloseVias } from './viafix.js';
 import { DSU } from '../core/util.js';
 import { pointInRing } from '../core/geom2d.js';
@@ -50,6 +50,9 @@ class Heap {
  * @param opt.nets 配線するネット（既定: 未配線のある全ネット）
  * @param opt.maxRips はがし直しの総数の上限（既定 300）
  * @param opt.seed 0 以外にすると引く順番を少し変える（結果が悪いときに別の順番を試す）
+ * @param opt.spokeReserve あとで表裏にベタを塗るネットの、サーマルのスポークの通り道を空けておく
+ *        { nets: ['GND'], layers: ['F.Cu'], gapMm, spokeMm, clearanceMm, count: 2 }。部品の外へ向かう向きを優先して count 方向。
+ *        直結（zoneConnect = 'solid'）の部品・別ネットのパッドにぶつかる向きは除く。pads: Set('部品:パッド') でパッドを限る
  * @param opt.onProgress (done, total, net) => void
  * @param opt.yieldEvery 何本ごとに処理を戻すか（画面を固めない）
  * @returns { routed, failed:[{net,a,b}], tracks, vias, rips }
@@ -106,6 +109,41 @@ export async function autoroute(pcb, rules, opt = {}) {
     capsule(M.v, c, c, Math.max(d / 2 + viaD / 2 + clr, h / 2 + viaH / 2 + rules.minHoleToHoleMm) + margin, id, who && own.v, who);
   };
 
+  // サーマルのスポークの通り道（ベタを塗ったとき、別ネットの配線・ビアがスポークをふさがないように）
+  function reserveSpokes(sr) {
+    const gap = sr.gapMm ?? 0.25, sw = sr.spokeMm ?? 0.3, zc = sr.clearanceMm ?? 0.2, want = sr.count ?? 2, mw = sr.minWidthMm ?? 0.25;
+    const nets = new Set(sr.nets || ['GND']), lays = (sr.layers || ['F.Cu']).filter((l) => base.t[l]);
+    for (const p of allPads(pcb)) {
+      if (!nets.has(p.net) || p.pad.type !== 'smd' || p.inst.zoneConnect === 'solid') continue;
+      if (sr.pads && !sr.pads.has(`${p.ref}:${p.pad.num}`)) continue; // パッドを指定したときはそのパッドだけ
+      const L = p.layers[0];
+      if (!lays.includes(L)) continue;
+      const id = nid(p.net), pad = p.pad;
+      // 部品の中心から外へ向かう向きを先に
+      const own = { x: toMm(p.inst.x), y: toMm(p.inst.y) };
+      const hw = Math.max(sw, mw) / 2 + zc; // 通り道の半幅（スポーク・最小幅の円 ＋ 間隔）
+      // 縦横の 4 方向（ベタの計算の 0°）と斜めの 4 方向（45°）。ふさがっていない向きが count 以上ある方の組を使う
+      const corridor = ([dx, dy]) => {
+        const exit = Math.min(dx ? pad.w / 2 / Math.abs(dx) : Infinity, dy ? pad.h / 2 / Math.abs(dy) : Infinity);
+        const len = exit, far = exit + gap * (dx && dy ? Math.SQRT2 : 1) + sw / 2 + mw + zc; // 先端の外にベタの最小幅の円
+        const A = fpToBoard(p.inst, pad.x + dx * len, pad.y + dy * len), B = fpToBoard(p.inst, pad.x + dx * far, pad.y + dy * far);
+        const out = (B.x - A.x) * (p.x - own.x) + (B.y - A.y) * (p.y - own.y);
+        // 別ネットのパッドにかかる向きは使えない（通り道の途中も調べる）
+        const hits = pads.some((q) => q !== p && q.net !== p.net && q.layers.includes(L) && Math.hypot(q.x - B.x, q.y - B.y) < Math.max(q.pad.w, q.pad.h) + far + 1
+          && [0.25, 0.5, 0.75, 1].some((t) => pointInPad(q.inst, q.pad, A.x + (B.x - A.x) * t, A.y + (B.y - A.y) * t, hw)));
+        return { a: A, b: B, out, hits };
+      };
+      const r2 = Math.SQRT1_2;
+      const ortho = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(corridor).filter((d) => !d.hits);
+      const diag = [[r2, r2], [-r2, r2], [-r2, -r2], [r2, -r2]].map(corridor).filter((d) => !d.hits);
+      const group = ortho.length >= want || ortho.length >= diag.length ? ortho : diag;
+      const dirs = group.sort((u, v) => v.out - u.out).slice(0, want);
+      for (const d of dirs) {
+        capsule(base.t[L], d.a, d.b, hw + W / 2 + margin, id);
+        capsule(base.v, d.a, d.b, hw + viaD / 2 + margin, id);
+      }
+    }
+  }
   const pads = allPads(pcb);
   const padByKey = new Map(pads.map((p) => [p.key, p]));
   for (const p of pads) {
@@ -116,12 +154,14 @@ export async function autoroute(pcb, rules, opt = {}) {
     paint(base.v, p.x - ext, p.y - ext, p.x + ext, p.y + ext, id, (x, y) => pointInPad(p.inst, p.pad, x, y, vI));
     if (p.pad.type === 'tht') { const h = padHole(p.inst, p.pad); capsule(base.v, h.a, h.b, h.d / 2 + viaH / 2 + rules.minHoleToHoleMm + margin, id); }
   }
+  if (opt.spokeReserve) reserveSpokes(opt.spokeReserve);
   for (const t of pcb.tracks) paintTrack(base, t.layer, { x: toMm(t.a.x), y: toMm(t.a.y) }, { x: toMm(t.b.x), y: toMm(t.b.y) }, toMm(t.width), nid(t.net));
   for (const v of pcb.vias) paintVia(base, { x: toMm(v.x), y: toMm(v.y) }, nid(v.net), 0, toMm(v.diameter), toMm(v.drill));
   for (const h of boardHoles(pcb)) {
-    const c = { x: toMm(h.x), y: toMm(h.y) }, r = toMm(h.drill) / 2;
-    for (const L of LAY) capsule(base.t[L], c, c, r + rules.minNpthToCopperMm + W / 2 + margin, BLOCK);
-    capsule(base.v, c, c, r + Math.max(rules.minNpthToCopperMm + viaD / 2, rules.minHoleToHoleMm + viaH / 2) + margin, BLOCK);
+    // 穴と銅の間隔、またはネジの頭の範囲（取付穴の keepout）の広い方
+    const c = { x: toMm(h.x), y: toMm(h.y) }, r = toMm(h.drill) / 2, keep = holeClearRadiusMm(h, rules.minNpthToCopperMm);
+    for (const L of LAY) capsule(base.t[L], c, c, keep + W / 2 + margin, BLOCK);
+    capsule(base.v, c, c, Math.max(keep + viaD / 2, r + rules.minHoleToHoleMm + viaH / 2) + margin, BLOCK);
   }
   const isInner = (l) => l !== 'F.Cu' && l !== 'B.Cu';
   const eT = LAY.map((l) => (isInner(l) ? rules.innerEdgeClearanceMm || rules.boardEdgeClearanceMm : rules.boardEdgeClearanceMm) + W / 2 + margin);

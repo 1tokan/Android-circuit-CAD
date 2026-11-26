@@ -36,7 +36,7 @@ await step('KiCanvas: sandbox の中で読み直し、数を照合する（KiCan
   await page.locator('[data-kicanvas]').click();
   const status = page.locator('.kicanvas-overlay .kicanvas-status');
   await status.filter({ hasText: '読み込めました' }).waitFor({ timeout: 10000 });
-  assert.match(await status.textContent(), /部品 75・パッド 303・配線 702・ビア 319・ベタ 7 が書き出しと一致/);
+  assert.match(await status.textContent(), /部品 79・パッド 307・配線 737・ビア 357・ベタ 7 が書き出しと一致/);
   assert.equal(await page.locator('.kicanvas-overlay iframe').getAttribute('sandbox'), 'allow-scripts');
   await page.screenshot({ path: `${OUT}/output-kicanvas-phone.png` });
   await page.locator('.kicanvas-overlay [data-close]').click();

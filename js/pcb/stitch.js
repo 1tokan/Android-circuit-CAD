@@ -5,7 +5,7 @@
 //   ・ノイズ: 帰りの電流の道を短くする。電源層の分割をまたぐ配線の近くに打つと、またぐ所の帰り道ができる
 // ビアは、どの層の配線・パッド・穴・ほかのビア・基板の縁からも規則の間隔を空けた所にだけ打ち、
 // 表と裏の両方でそのネットのベタの中（塗られた所）にある点に限る（打っても孤立しない）。
-import { toMm, toNm, boardRect, allPads, padHole, pointInPad, boardHoles } from './model.js';
+import { toMm, toNm, boardRect, allPads, padHole, pointInPad, boardHoles, holeClearRadiusMm } from './model.js';
 import { newId } from '../core/project.js';
 import { fillAllZones, pointInPolyWithHoles } from './zonefill.js';
 
@@ -35,7 +35,7 @@ export function addStitchVias(pcb, rules, { net = 'GND', pitchMm = 3, near = [],
   const pads = allPads(pcb);
   const holes = [];
   for (const p of pads) if (p.pad.drill || p.pad.slot) holes.push(padHole(p.inst, p.pad));
-  for (const h of boardHoles(pcb)) holes.push({ a: { x: toMm(h.x), y: toMm(h.y) }, b: { x: toMm(h.x), y: toMm(h.y) }, d: toMm(h.drill), npth: true });
+  for (const h of boardHoles(pcb)) holes.push({ a: { x: toMm(h.x), y: toMm(h.y) }, b: { x: toMm(h.x), y: toMm(h.y) }, d: toMm(h.drill), npth: true, keep: h.keepout ? toMm(h.keepout) / 2 : 0 });
   const F = fills || fillAllZones(pcb, rules);
   const outer = pcb.zones.filter((z) => z.net === net && (z.layer === 'F.Cu' || z.layer === 'B.Cu'));
   const outerLayers = [...new Set(outer.map((z) => z.layer))];
@@ -52,7 +52,7 @@ export function addStitchVias(pcb, rules, { net = 'GND', pitchMm = 3, near = [],
     }
     for (const h of holes) {
       // 穴の縁どうし（最小 minHoleToHole）と、取付穴（NPTH）の縁からビアの銅まで、の両方
-      const need = Math.max(h.d / 2 + drill / 2 + (rules.minHoleToHoleMm ?? 0.5), h.npth ? h.d / 2 + r + Math.max(rules.minNpthToCopperMm ?? 0.254, 0.3) : 0);
+      const need = Math.max(h.d / 2 + drill / 2 + (rules.minHoleToHoleMm ?? 0.5), h.npth ? Math.max(h.d / 2 + Math.max(rules.minNpthToCopperMm ?? 0.254, 0.3), h.keep || 0) + r : 0); // ネジの頭の範囲（keepout）も避ける
       if (distSeg(p, h.a, h.b) < need + 0.01) return false;
     }
     // 表と裏の両方で、このネットのベタの塗られた所（ベタの無い面は問わない）

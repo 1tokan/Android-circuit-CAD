@@ -16,10 +16,11 @@ export class ClaudeError extends Error {
 }
 
 /**
- * @param o { apiKey, model, system, messages:[{role, content}], schema, maxTokens, fetchImpl, signal }
+ * @param o { apiKey, model, system, messages:[{role, content}], schema, maxTokens, cache, fetchImpl, signal }
+ *   cache: true なら指示文（system）をプロンプトキャッシュに置く（同じ指示文の 2 回目からは入力の料金が約 1 割）
  * @returns {{ json, usage, stopReason }}
  */
-export async function callClaude({ apiKey, model, system, messages, schema, maxTokens = 32000, fetchImpl = (...a) => fetch(...a), signal }) {
+export async function callClaude({ apiKey, model, system, messages, schema, maxTokens = 32000, cache = false, fetchImpl = (...a) => fetch(...a), signal }) {
   if (!apiKey) throw new ClaudeError('key', 'API キーがありません');
   let res;
   try {
@@ -33,7 +34,8 @@ export async function callClaude({ apiKey, model, system, messages, schema, maxT
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       body: JSON.stringify({
-        model, max_tokens: maxTokens, system, messages,
+        model, max_tokens: maxTokens, messages,
+        system: cache && typeof system === 'string' ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system,
         output_config: { format: { type: 'json_schema', schema } },
       }),
     });

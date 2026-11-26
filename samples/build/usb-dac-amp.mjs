@@ -5,7 +5,8 @@
 // ID と日時は決まった値にするので、同じプログラムからは毎回同じファイルになる。
 //
 // 設計の要点（詳しくは README の「サンプル」）
-//  - 60×26mm・4層（In1 = GND、In2 = 電源の分割）・片面実装（JLCPCB のエコノミー PCBA は片面だけ）
+//  - 60×34mm・4層（In1 = GND、In2 = 電源の分割）・片面実装（JLCPCB のエコノミー PCBA は片面だけ）・四隅に M3 の取付穴
+//  - 表の GND のベタ: IC・USB-C は直結、チップ部品はサーマル（スポーク 2 本以上の通り道を空けて置き、ふさいだ配線は引き直す）
 //  - USB-C → P-ch MOSFET でゆっくり入れる（突入電流の制限）→ LDO ×2（デジタル／アナログの 3.3V）・ロードスイッチ（スピーカー用 5V）
 //  - ESP32-S3 → I2S を GPIO マトリクスで 3 組に出す → PCM5102A＋TPA6132A2（ヘッドホン）／MAX98357A ×2（スピーカー）
 //  - 部品のフットプリントはすべてアプリ内蔵（KiCad 公式の寸法）
@@ -16,10 +17,18 @@ const ROOT = new URL('../../', import.meta.url);
 const M = await loadModules(ROOT.href);
 const { autoroute } = await import(new URL('js/pcb/autoroute.js', ROOT).href);
 const { netWidthFor } = await import(new URL('js/check/current.js', ROOT).href);
-const { placeRefdes } = await import(new URL('js/pcb/shapes.js', ROOT).href);
+const { placeRefdes, pin1Mark, PIN1_MARK_R } = await import(new URL('js/pcb/shapes.js', ROOT).href);
 const { addStitchVias, planeSplitCrossings } = await import(new URL('js/pcb/stitch.js', ROOT).href);
-const OUT = new URL('samples/usb-dac-amp.json', ROOT);
+const { fixStarvedThermals } = await import(new URL('js/pcb/thermalfix.js', ROOT).href);
+const { repairUnrouted } = await import(new URL('js/pcb/routefix.js', ROOT).href);
 const CHECK = process.argv.includes('--check');
+// 試すとき（tests/tools/sample-sweep.mjs）: 配置・配線の値を SAMPLE_PARAMS（JSON）で変え、SAMPLE_OUT に書く。同梱のファイルは変えない
+const DEFAULTS = { W: 60, H: 34, J3Y: 11.0, seed: 14, pgap: 0.15, u4PinClear: 1.2, icPinClear: 0.9 };
+const TRY = process.env.SAMPLE_PARAMS ? JSON.parse(process.env.SAMPLE_PARAMS) : null;
+if (TRY && CHECK) throw new Error('--check は既定の値で（SAMPLE_PARAMS を外して）');
+const PRM = { ...DEFAULTS, ...(TRY || {}) };
+const OUT = process.env.SAMPLE_OUT ? new URL(`file://${process.env.SAMPLE_OUT}`) : TRY ? null : new URL('samples/usb-dac-amp.json', ROOT);
+if (!OUT) throw new Error('SAMPLE_PARAMS のときは SAMPLE_OUT に書き先を（同梱のサンプルを上書きしない）');
 const log = (...a) => { if (!CHECK) console.error(...a); };
 
 // 決まった ID・日時（同じ入力から同じファイル）
@@ -173,56 +182,97 @@ pcb.settings.layers = 4;
 Object.assign(prj.board.fab, { thicknessMm: 1.6, stackup: 'JLC7628', outerCopperOz: 1, innerCopperOz: 0.5, maskColor: 'green', silkColor: 'white', finish: 'ENIG', viaProcess: 'epoxyFilled' });
 const resolve = (c) => { const pt = prj.library.parts.find((p) => p.id === c.partId); return (pt && M.parts.partFootprint(pt)) || M.fps.getFootprint(c.footprint); };
 M.pcb.importNetlist(pcb, nl, resolve);
-const W = 60, H = 26;
+// 60×34mm: 元の 60×26mm に、四隅の取付穴（M3）の分として上下に 4mm ずつ足した大きさ
+const W = PRM.W, H = PRM.H;
 M.pcb.setOutlineRect(pcb, W, H);
+// 四隅に M3 の取付穴（穴 3.2mm・ネジの頭の範囲 φ6.0 には銅も部品も置かない）
+M.pcb.addCornerHoles(pcb, { screw: 'M3' });
 const toMm = M.pcb.toMm;
 const at = (ref, x, y, rot = 0, side = 'top') => { const f = pcb.footprints.find((q) => q.ref === ref); f.x = M.pcb.toNm(x); f.y = M.pcb.toNm(y); f.rot = rot; f.side = side; f.locked = true; return f; };
 const body = (id) => M.fps.getFootprint(id).body;
 // 主要部品（USB-C は左端、スピーカー端子は右端、3.5mm ジャックは上辺から差し込む向き）
+// 元の 60×26mm の配置を 4mm 下げて置く（上下の 4mm の帯は四隅の取付穴と、つなぎビア・ベタの場所）。
+// 縁に出すコネクタ（USB-C・ジャック・スピーカー端子）だけは縁に合わせる
+const DY = (H - 26) / 2;
+const atT = (ref, x, y, rot, side) => at(ref, x, y + DY, rot, side);
+const atB = atT, atC = atT;
 const fabUsb = body('USB_C_HRO_TYPE-C-31-M-12'); // 口は KiCad の +y 側
 at('J1', fabUsb.cy + fabUsb.h / 2 - 0.6, H / 2, 90);
-at('U1', 10.6, H / 2, 0);
-at('U2', 11.5, 3.0, 90); at('U3', 11.5, H - 3.0, 90);
-at('U4', 20.5, H / 2, 0);
-at('Y1', 17.2, 2.4, 0);
-// 書き込み用のテストパッドは裏（部品は載せない）
-at('TP1', 4.2, 2.3, 0, 'bottom'); at('TP2', 6.2, 2.3, 0, 'bottom');
-// 動作表示の LED は上辺の近く（基板の真ん中は I2S の配線が通る）
-at('D1', 24.0, 1.2, 0);
-at('U5', 30.5, H / 2, 180);
-at('U6', 37.4, H / 2, 180);
-// スピーカーアンプはジャックの左の上下の縁に（出力は縁に沿って右端のスピーカー端子へ）
-at('U7', 36.5, 3.4, 270); at('U8', 36.5, H - 3.4, 270);
+atC('U1', 10.6, 13, 0);
+atT('U2', 11.5, 3.0, 90); atB('U3', 11.5, 23.0, 90);
+atC('U4', 20.5, 13, 0);
+atT('Y1', 17.2, 2.4, 0);
+// 書き込み用のテストパッドは裏（部品は載せない）。左上の取付穴の右
+at('TP1', 7.8, 1.8, 0, 'bottom'); at('TP2', 9.8, 1.8, 0, 'bottom');
+// 動作表示の LED は上の縁の近く（基板の真ん中は I2S の配線が通る）
+atT('D1', 24.0, 1.2, 0);
+atC('U5', 30.5, 13, 180);
+atC('U6', 37.4, 13, 180);
+// スピーカーアンプはジャックの左の上下の縁に（出力は右端のスピーカー端子へ）
+atT('U7', 36.5, 3.4, 270); atB('U8', 36.5, 22.6, 270);
 // 3.5mm ジャックは上の長辺から差し込む向き（鼻先は KiCad の -y 側 → 回転 0 で上辺）
 const fabJack = body('Jack_3.5mm_CUI_SJ-3524-SMT_Horizontal');
 at('J2', 45.2, -(fabJack.cy - fabJack.h / 2) - 0.4, 0).hideRef = true;
-// スピーカー端子 L/R は右端に並べ、差し込み口を右に向ける（KiCad の +y が口 → 270°）
+// スピーカー端子 L/R は右端に並べ、差し込み口を右に向ける（KiCad の +y が口 → 270°）。上下は四隅の取付穴の範囲を避ける
 const spkFab = body('JST_PH_S2B-PH-K_1x02_P2.00mm_Horizontal');
 const spkX = W - (spkFab.cy + spkFab.h / 2);
-at('J3', spkX, 4.0, 270); at('J4', spkX, H - 4.5, 270); // 位置は 2 本のピンの中心
-M.pcb.addText(pcb, spkX - 2.2, 1.2, 'L', 'F.SilkS', 1.0);
-M.pcb.addText(pcb, spkX - 2.2, 18.6, 'R', 'F.SilkS', 1.0);
+const J3Y = PRM.J3Y; // 右上・右下の取付穴の範囲（φ6）を避ける
+at('J3', spkX, J3Y, 270); at('J4', spkX, H - J3Y - 0.5, 270); // 位置は 2 本のピンの中心
+M.pcb.addText(pcb, spkX - 2.2, J3Y - 2.8, 'L', 'F.SilkS', 1.0);
+M.pcb.addText(pcb, spkX - 2.2, H - J3Y - 0.5 + 2.8, 'R', 'F.SilkS', 1.0);
 
 // 受動部品: つながる IC・コネクタのピンの近くの空きに、表に置く（片面実装）
 const boxes = [];
 const grow = (b, g) => ({ x0: b.x0 - g, y0: b.y0 - g, x1: b.x1 + g, y1: b.y1 + g });
 const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-for (const f of pcb.footprints.filter((q) => q.locked && q.side === 'top')) boxes.push(M.pcb.fpBox(f));
+// 1 番ピンの印（シルクの丸）は外形枠の外に出ることがある。ほかの部品のパッドがかからないよう、印も避ける
+const markBox = (f) => { const m = pin1Mark(f.fpDef); if (!m) return null; const c = M.pcb.fpToBoard(f, m.x, m.y), r = PIN1_MARK_R + 0.1; return { x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r }; };
+for (const f of pcb.footprints.filter((q) => q.locked && q.side === 'top')) { boxes.push(M.pcb.fpBox(f)); const mb = markBox(f); if (mb) boxes.push(mb); }
 // IC のピンの外側（引き出してビアを打つ場所）には置かない
 for (const f of pcb.footprints.filter((q) => q.locked && /^U/.test(q.ref))) {
   const pads = f.fpDef.pads.filter((p) => p.type === 'smd' && Math.max(p.w, p.h) < 1.2);
   if (pads.length < 8) continue;
-  for (const p of pads) { const c = M.pcb.fpToBoard(f, p.x, p.y); const r = Math.max(p.w, p.h) / 2 + 0.9; boxes.push({ x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r }); }
+  for (const p of pads) { const c = M.pcb.fpToBoard(f, p.x, p.y); const r = Math.max(p.w, p.h) / 2 + (f.ref === 'U4' ? PRM.u4PinClear : PRM.icPinClear); boxes.push({ x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r }); }
 }
-for (const h of M.pcb.boardHoles(pcb)) { const r = toMm(h.drill) / 2 + 0.3; boxes.push({ x0: toMm(h.x) - r, y0: toMm(h.y) - r, x1: toMm(h.x) + r, y1: toMm(h.y) + r }); }
+for (const h of M.pcb.boardHoles(pcb)) { const r = M.pcb.holeClearRadiusMm(h, 0.3); boxes.push({ x0: toMm(h.x) - r, y0: toMm(h.y) - r, x1: toMm(h.x) + r, y1: toMm(h.y) + r }); }
 const padPos = new Map(); // ネット → 主要部品のパッドの位置
 for (const p of M.pcb.allPads(pcb)) if (p.inst.locked && p.net && p.net !== 'GND') { const c = M.pcb.fpToBoard(p.inst, p.pad.x, p.pad.y); (padPos.get(p.net) || padPos.set(p.net, []).get(p.net)).push(c); }
 // 置く相手を決めてある部品（パスコン・設定用の抵抗・保護素子）
 const NEAR = { C37: 'U9', R14: 'U9', C2: 'U9', R12: 'U7', R13: 'U8', C38: 'Q1', C39: 'Q1', C40: 'Q1', R15: 'Q1', C33: 'U7', C34: 'U7', C35: 'U8', C36: 'U8', Q1: 'U1', D2: 'J2', D3: 'J2', R8: 'U5' };
 const notFit = [];
+const PGAP = PRM.pgap; // 部品どうしの外形枠の間隔
 // IC・トランジスタ → コンデンサ → 抵抗ほかの順
 const rank = (r) => (/^[UQ]\d/.test(r) ? -1 : /^C/.test(r) ? 0 : 1);
 const order = pcb.footprints.filter((f) => !f.locked).sort((a, b) => rank(a.ref) - rank(b.ref));
+// 表の GND のベタのスポークの通り道（自動配線の spokeReserve と同じ寸法）。GND のパッドごとに 2 方向が空く所にだけ置き、その通り道に後の部品を置かない
+const SPK = { gap: 0.25, sw: 0.3, mw: 0.25, zc: 0.2 };
+const spokeBoxes = (f) => {
+  const out = [];
+  const own = M.pcb.fpBox(f);
+  const ownPads = f.fpDef.pads.map((q) => ({ q, net: f.padNets[q.num] }));
+  for (const { q: pad, net } of ownPads) {
+    if (net !== 'GND' || pad.type !== 'smd' || f.zoneConnect === 'solid') continue;
+    const hw = Math.max(SPK.sw, SPK.mw) / 2 + SPK.zc;
+    const free = [];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const len = dx ? pad.w / 2 : pad.h / 2, far = len + SPK.gap + SPK.sw / 2 + SPK.mw + SPK.zc;
+      const A = M.pcb.fpToBoard(f, pad.x + dx * len, pad.y + dy * len), B = M.pcb.fpToBoard(f, pad.x + dx * far, pad.y + dy * far);
+      const bx = { x0: Math.min(A.x, B.x) - hw, y0: Math.min(A.y, B.y) - hw, x1: Math.max(A.x, B.x) + hw, y1: Math.max(A.y, B.y) + hw };
+      if (bx.x0 < 0.5 || bx.y0 < 0.5 || bx.x1 > W - 0.5 || bx.y1 > H - 0.5) continue;
+      if (boxes.some((o) => o !== own && hit(bx, o))) continue;
+      // 自分のほかのパッド（別ネット）にかかる向きは使えない
+      if (ownPads.some((o) => o.net !== net && [0.25, 0.5, 0.75, 1].some((t) => M.pcb.pointInPad(f, o.q, A.x + (B.x - A.x) * t, A.y + (B.y - A.y) * t, hw)))) continue;
+      const c = M.pcb.fpToBoard(f, pad.x, pad.y);
+      free.push({ bx, out: (B.x - A.x) * (c.x - toMm(f.x)) + (B.y - A.y) * (c.y - toMm(f.y)) });
+    }
+    if (free.length < 2) return null;
+    out.push(...free.sort((u, v) => v.out - u.out).slice(0, 2).map((d) => d.bx));
+  }
+  return out;
+};
+// IC と USB-C はベタに直結（細かいピッチのピンや露出パッドはスポークの場所が無い。LDO は GND のピンから熱を逃がす。
+// IC・コネクタは立ち上がり（ツームストーン）の心配が無い）。小さいチップ部品はサーマルのまま
+for (const f of pcb.footprints) if (/^U\d/.test(f.ref) || f.ref === 'J1') f.zoneConnect = 'solid';
 for (const f of order) {
   const myNets = M.pcb.allPads(pcb).filter((p) => p.inst === f && p.net && p.net !== 'GND').map((p) => p.net);
   // 信号のネットがあればそちらのピンの近く（電源のネットはパッドが基板中に散らばるので、目標の重心をずらしてしまう）
@@ -242,13 +292,18 @@ for (const f of order) {
     f.x = M.pcb.toNm(x); f.y = M.pcb.toNm(y); f.rot = rot; f.side = 'top';
     const b = M.pcb.fpBox(f);
     if (b.x0 < 0.5 || b.y0 < 0.5 || b.x1 > W - 0.5 || b.y1 > H - 0.5) continue;
-    if (boxes.some((o) => hit(grow(b, 0.15), o))) continue;
-    best = { x, y, rot };
+    if (boxes.some((o) => hit(grow(b, PGAP), o))) continue;
+    const mb = markBox(f);
+    if (mb && boxes.some((o) => hit(mb, o))) continue;
+    const sb = spokeBoxes(f);
+    if (!sb) continue;
+    best = { x, y, rot, sb };
     break;
   }
   if (!best) { notFit.push(f.ref); continue; }
   f.x = M.pcb.toNm(best.x); f.y = M.pcb.toNm(best.y); f.rot = best.rot; f.side = 'top'; f.hideRef = true;
-  boxes.push(M.pcb.fpBox(f));
+  boxes.push(M.pcb.fpBox(f)); const mb = markBox(f); if (mb) boxes.push(mb);
+  boxes.push(...best.sb);
 }
 
 // ---------------- 内層 ----------------
@@ -256,11 +311,11 @@ for (const f of order) {
 M.pcb.addBoardZone(pcb, 'In1.Cu', 'GND');
 const plane = (net, pts) => pcb.zones.push({ id: M.project.newId('z'), layer: 'In2.Cu', net, polygon: pts.map(([x, y]) => ({ x: M.pcb.toNm(x), y: M.pcb.toNm(y) })), clearance: M.pcb.toNm(0.3), minWidth: M.pcb.toNm(0.25), filled: false });
 const rect = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-const RX = 44.0;
-plane('+5V_SYS', rect(0.5, 0.5, 12.0, H - 0.5));
-plane('+5V_SPK', [[12.5, 0.5], [W - 0.5, 0.5], [W - 0.5, H - 0.5], [12.5, H - 0.5], [12.5, H - 5.6], [RX, H - 5.6], [RX, 5.6], [12.5, 5.6]]);
-plane('+3V3', rect(12.5, 6.1, 25.6, H - 6.1));
-plane('+3V3A', rect(26.1, 6.1, RX - 0.5, H - 6.1));
+const RX = 44.0, X1 = 12.0, X2 = 12.5, BY = 5.6 + DY, IY = 6.1 + DY;
+plane('+5V_SYS', rect(0.5, 0.5, X1, H - 0.5));
+plane('+5V_SPK', [[X2, 0.5], [W - 0.5, 0.5], [W - 0.5, H - 0.5], [X2, H - 0.5], [X2, H - BY], [RX, H - BY], [RX, BY], [X2, BY]]);
+plane('+3V3', rect(X2, IY, 25.6, H - IY));
+plane('+3V3A', rect(26.1, IY, RX - 0.5, H - IY));
 M.pcb.addBoardZone(pcb, 'B.Cu', 'GND');
 
 // ネットごとの最大電流（検査 →「電流」と同じ設定）
@@ -291,10 +346,14 @@ for (const p of M.pcb.allPads(pcb)) {
 // ---------------- 自動配線 ----------------
 // 電源を太め優先で引くと、この大きさでは配線しきれない。電流から求めた幅（最低 0.15mm で 0.6A 相当）で引く
 const t0 = Date.now();
-const routed = await autoroute(pcb, rules, {
+const ROUTE = {
   powerWidth: 0.15, netWidth: (n) => Math.max(netWidthFor(prj, n, 'F.Cu'), netWidthFor(prj, n, 'B.Cu')),
-  seed: 2, maxRips: 3000, layers: ['F.Cu', 'B.Cu'], maxNodes: 600000, passes: 10,
-});
+  seed: PRM.seed, maxRips: 3000, layers: ['F.Cu', 'B.Cu'], maxNodes: 600000, passes: 10,
+};
+const routed = await autoroute(pcb, rules, ROUTE);
+// 引けなかった接続は、邪魔な配線をはがして引き直す
+const firstFailed = routed.failed.map((f) => f.net);
+if (routed.failed.length) routed.failed = (await repairUnrouted(pcb, rules, routed.failed, { route: ROUTE, onLog: log, tries: 10 })).failed;
 log('autoroute', routed.routed.length, 'ok', routed.failed.length, 'failed', routed.vias, 'vias', routed.rips, 'rips', ((Date.now() - t0) / 1000).toFixed(1), 's');
 // 部品番号をパッドにかからない位置へ。置き場所の無いもの（小さい部品が密集している所）はシルクに出さない
 const refd = placeRefdes(pcb);
@@ -303,7 +362,11 @@ for (const r of refd.conflicts) pcb.footprints.find((f) => f.ref === r).hideRef 
 // ---------------- 表の GND ベタとつなぎビア ----------------
 // 表の空きに GND のベタ（放熱・帰り道・シールド）。配線のあとに足すので、配線の結果は変わらない
 // つなぎビア: LDO・ロードスイッチの GND ピンの近く（熱を内層・裏へ）、裏の信号が電源層の分割をまたぐ所の近く（帰り道）、残りは 3mm 格子
-M.pcb.addBoardZone(pcb, 'F.Cu', 'GND');
+// 表のベタは部品の間に入り込むので、間隔を詰める（別ネットとの間隔 0.2mm・サーマルの隙間 0.25mm。JLCPCB の最小 0.1mm に余裕がある）
+const zF = M.pcb.addBoardZone(pcb, 'F.Cu', 'GND');
+zF.clearance = M.pcb.toNm(0.2); zF.thermalGap = M.pcb.toNm(0.25); zF.spokeWidth = M.pcb.toNm(0.3);
+// スポークが足りないパッドは、通り道をふさぐ配線を引き直す
+const tf = await fixStarvedThermals(pcb, rules, { rounds: 6, onLog: log, route: ROUTE });
 const F = M.zonefill.fillAllZones(pcb, rules);
 const cross = planeSplitCrossings(pcb, rules, { fills: F });
 const heat = [];
@@ -323,8 +386,8 @@ const by = (r) => r.issues.reduce((m, i) => ((m[`${i.level}:${i.rule}`] = (m[`${
 const report = {
   parts: ap.placed, nets: nl.nets.length, netlistProblems: nl.problems.map((p) => `${p.level}: ${p.message}`),
   erc: { summary: erc.summary, byRule: by(erc) },
-  placement: { notFit }, epVias, route: { ok: routed.routed.length, failed: routed.failed, vias: routed.vias, rips: routed.rips },
-  stitch: { added: st.added.length, crossings: cross.length },
+  placement: { notFit }, epVias, route: { ok: routed.routed.length, firstFailed, failed: routed.failed, vias: routed.vias, rips: routed.rips },
+  stitch: { added: st.added.length, crossings: cross.length }, thermalFix: tf,
   drc: { summary: drc.summary, byRule: by(drc), errors: drc.issues.filter((i) => i.level === 'error').map((i) => i.message) },
   bom: asm.bom.length, cpl: asm.cpl.length, asmProblems: asm.problems.map((p) => `${p.level}: ${p.message}`),
 };

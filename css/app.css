@@ -496,3 +496,36 @@ button { font: inherit; color: inherit; }
 .kicanvas-status.ok { color: var(--ok, #4ade80); }
 .kicanvas-status.ng { color: var(--err, #f87171); }
 .kicanvas-bar > .btn { flex-shrink: 0; white-space: nowrap; }
+
+/* ---- シミュレーション ---- */
+.sim { display: flex; flex-direction: column; gap: 8px; max-width: 980px; }
+.sim .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.sim .seg .chip { border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 16px; padding: 6px 12px; min-height: 36px; }
+.sim .seg .chip.on, .sim .chip.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.sim .chip { border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 16px; padding: 4px 10px; min-height: 32px; font-size: 13px; }
+.sim .form-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; }
+.sim .field.small { flex: 1 1 120px; min-width: 100px; }
+.sim .field.small.grow { flex: 3 1 200px; }
+.sim .field.small input, .sim .field.small select { width: 100%; }
+.sim-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.sim-sec { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.sim-sec > summary, .sim-probes > summary, .sim-tune > summary, .sim-warn > summary { cursor: pointer; font-weight: 600; min-height: 32px; line-height: 32px; }
+.sim-list { list-style: none; padding: 0; margin: 4px 0; }
+.sim-list li { padding: 2px 0; }
+.sim .link { background: none; border: 0; color: var(--accent); padding: 6px 0; text-align: left; cursor: pointer; font: inherit; }
+.sim-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 4px 0 8px; }
+.sim-table th, .sim-table td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+.sim-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sim-table .muted, .sim .muted { color: var(--fg2); }
+.sim-lib { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; background: var(--bg2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.sim-plotwrap { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 4px; touch-action: manipulation; }
+.sim-plot { display: block; cursor: crosshair; }
+.sim-plot .plot-bg { fill: var(--canvas); }
+.sim-plot .plot-grid { stroke: var(--line); stroke-width: 0.6; }
+.sim-plot .plot-tick, .sim-plot .plot-unit { fill: var(--fg2); font-size: 10px; }
+.sim-plot .plot-cursor { stroke: #f0c040; stroke-width: 1; stroke-dasharray: 3 2; }
+.sim-plot .plot-cursor.b { stroke: #40d0f0; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+.legend i { display: inline-block; width: 14px; height: 3px; margin-right: 4px; vertical-align: middle; }
+.sim-filter { width: 100%; margin: 4px 0 6px; padding: 6px 8px; background: var(--bg2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+.sim-progress { color: var(--accent); }

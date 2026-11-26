@@ -68,7 +68,8 @@ export function renderPcb(pcb, { selection = new Set(), conn = null, activeLayer
   out.push('<g class="pads">' + fps.map((f) => footprintLayer(f, 'Cu', selection.has(`f:${f.id}`))).join('') + '</g>');
   // ビア・穴
   out.push('<g class="vias">' + pcb.vias.map((v) => `<circle class="via${selection.has(`v:${v.id}`) ? ' sel' : ''}" cx="${toMm(v.x)}" cy="${toMm(v.y)}" r="${toMm(v.diameter) / 2}"/><circle class="drill" cx="${toMm(v.x)}" cy="${toMm(v.y)}" r="${toMm(v.drill) / 2}"/>`).join('') + '</g>');
-  out.push('<g class="holes">' + boardHoles(pcb).map((h) => `<circle class="hole${selection.has(`h:${h.id}`) ? ' sel' : ''}" cx="${toMm(h.x)}" cy="${toMm(h.y)}" r="${toMm(h.drill) / 2}"/>`).join('') + '</g>');
+  // 取付穴のネジの頭の範囲（keepout）は破線の円
+  out.push('<g class="holes">' + boardHoles(pcb).map((h) => `${h.keepout ? `<circle class="hole-keepout" cx="${toMm(h.x)}" cy="${toMm(h.y)}" r="${toMm(h.keepout) / 2}" fill="none" stroke="#c8c8c8" stroke-width="0.08" stroke-dasharray="0.4 0.3"/>` : ''}<circle class="hole${selection.has(`h:${h.id}`) ? ' sel' : ''}" cx="${toMm(h.x)}" cy="${toMm(h.y)}" r="${toMm(h.drill) / 2}"/>`).join('') + '</g>');
   // シルク
   if (S.silk) {
     out.push('<g class="silk-layer">' + fps.map((f) => footprintLayer(f, 'Silk', selection.has(`f:${f.id}`))).join(''));

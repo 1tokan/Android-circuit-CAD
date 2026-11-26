@@ -14,6 +14,7 @@ export const MODULES = [
   { id: 'signal',    name: '信号経路（USB・I2S・アナログ音声）', stage: 5, status: 'ready', note: 'つながり・左右・極性・役割は汎用。設定ピン・レベル・入力インピーダンスは登録した部品（PCM5102A・TPA6132A2・MAX98357A・USBLC6）のみ。ファームウェアは対象外' },
   { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'ready', note: 'RS-274X X2・Excellon・ZIP。ベタの塗りつぶし（クリアランス・サーマル・島除去）を含む' },
   { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'ready', note: 'JLCPCB形式。回転はパッケージ補正表＋部品ごとの手動補正（プレビューで要確認）' },
+  { id: 'sim',       name: '回路シミュレーション（SPICE 相当）', stage: 13, status: 'partial', note: '動作点・直流スイープ（2 重まで）・AC・過渡、FFT・カーソル・測定・チューニング、SPICE（ngspice）ネットリスト書き出し、.model と R C L V I E G D Q M X の .subckt の読込。モデル: ダイオード・バイポーラ（Gummel-Poon の基本）・MOSFET レベル 1・オペアンプ（飽和つき）。未実装: 雑音解析・極零・伝達関数・感度、B 素子（式）・JFET・スイッチ素子・.param・.lib・BSIM などの高度な MOSFET モデル、温度の変更' },
   { id: 'kicad',     name: 'KiCad 書き出し',   stage: 7, status: 'ready', note: 'プロジェクト一式（.kicad_pcb・.kicad_sch・シンボル・フットプリント・簡易 3D・設計ルール）。KiCad 7.0.11 で読み込み・照合を確認。3D は簡易形状' },
 ];
 
@@ -24,6 +25,7 @@ export const WORKSPACES = [
   { id: 'parts',     label: '部品',  icon: 'parts', modules: ['library', 'lcsc'] },
   { id: 'check',     label: '検査',  icon: 'check', modules: ['erc', 'drc', 'signal'] },
   { id: 'output',    label: '出力',  icon: 'out', modules: ['gerber', 'bomcpl', 'kicad'] },
+  { id: 'sim',       label: 'シミュ', icon: 'sim', modules: ['sim'] },
 ];
 
 // 各作業領域の下部ツール
@@ -59,6 +61,11 @@ export const TOOLS = {
     { id: 'drc', label: 'DRC実行', icon: 'M4 4h16v16H4zM8 8h3v3H8zM13 13h3v3h-3zM11 9.5h4v3.5' },
     { id: 'sig', label: '信号経路', icon: 'M3 12h4l3-6 4 12 3-6h4M19 9l3 3-3 3' },
     { id: 'rules', label: 'ルール', icon: 'M5 6h14M5 12h14M5 18h14M9 4v4M15 10v4M8 16v4' },
+  ],
+  sim: [
+    { id: 'run', label: '実行', icon: 'M7 4l12 8-12 8z' },
+    { id: 'source', label: '信号源', icon: 'M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zM6 12c2-5 4-5 6 0s4 5 6 0' },
+    { id: 'spice', label: 'SPICE', icon: 'M12 15V4M7 9l5-5 5 5M5 20h14' },
   ],
   output: [
     { id: 'gerber', label: 'Gerber書出', module: 'gerber', icon: 'M12 4v11M7 10l5 5 5-5M5 20h14' },
