@@ -518,14 +518,32 @@ button { font: inherit; color: inherit; }
 .sim-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sim-table .muted, .sim .muted { color: var(--fg2); }
 .sim-lib { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; background: var(--bg2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
-.sim-plotwrap { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 4px; touch-action: manipulation; }
-.sim-plot { display: block; cursor: crosshair; }
+.sim-plotwrap { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+.sim-panel + .sim-panel { border-top: 1px solid var(--line); margin-top: 2px; }
+.sim-panel-h { font-size: 12px; font-weight: 600; color: var(--fg2); padding: 2px 4px 0; }
+/* 横のドラッグはカーソル、縦のスワイプは画面のスクロール */
+.sim-plot { display: block; cursor: ew-resize; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.sim-plot .plot-cur-tab { fill: #f0c040; }
+.sim-plot .plot-cur.b .plot-cur-tab { fill: #40d0f0; }
+.sim-plot .plot-cur-label { fill: #111; font-size: 10px; font-weight: 700; pointer-events: none; }
+.cur-key { display: inline-block; min-width: 16px; text-align: center; border-radius: 3px; color: #111; font-weight: 700; font-size: 11px; }
+.cur-key.a { background: #f0c040; } .cur-key.b { background: #40d0f0; }
+.sim .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; border: 1px solid var(--line); }
+.chip.sig { display: inline-flex; align-items: center; }
+.chip:disabled { opacity: 0.4; }
+.sig-tools { display: flex; gap: 6px; align-items: center; }
+.sig-tools .sim-filter { flex: 1; }
+.sig-on { margin: 4px 0; min-height: 34px; align-items: center; }
+.sig-group { margin: 4px 0; border-top: 1px solid var(--line); }
+.sig-h { font-size: 13px; color: var(--fg2); min-height: 36px; line-height: 36px; cursor: pointer; }
+.sim-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sim-scroll .sim-table td:first-child, .sim-table th { white-space: nowrap; }
+.sim-scroll .sim-table td.num { font-size: 12px; }
+.sum-note { font-weight: 400; font-size: 12px; margin-left: 8px; }
 .sim-plot .plot-bg { fill: var(--canvas); }
 .sim-plot .plot-grid { stroke: var(--line); stroke-width: 0.6; }
 .sim-plot .plot-tick, .sim-plot .plot-unit { fill: var(--fg2); font-size: 10px; }
 .sim-plot .plot-cursor { stroke: #f0c040; stroke-width: 1; stroke-dasharray: 3 2; }
 .sim-plot .plot-cursor.b { stroke: #40d0f0; }
-.legend-row { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; }
-.legend i { display: inline-block; width: 14px; height: 3px; margin-right: 4px; vertical-align: middle; }
 .sim-filter { width: 100%; margin: 4px 0 6px; padding: 6px 8px; background: var(--bg2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
 .sim-progress { color: var(--accent); }

@@ -19,11 +19,13 @@ function logTicks(lo, hi) {
 }
 
 /**
- * @param o { traces: [{ name, x, y, color, right?: true, dash? }], xLog, xUnit, yUnit, y2Unit, xRange: [a, b], cursor: x, width, height }
- * @returns SVG の文字列
+ * @param o { traces: [{ name, x, y, color, right?: true, dash? }], xLog, xUnit, yUnit, y2Unit, xRange: [a, b], cursor, cursor2, width, height, id, showX }
+ *  - カーソル A・B はいつも要素を置く（無いときは隠す）。ドラッグ中は moveCursor で位置だけ動かす
+ *  - id: 1 画面に複数のグラフを並べるときの clipPath の名前
+ * @returns { svg, map }
  */
 export function plotSvg(o) {
-  const W = o.width || 360, H = o.height || 220, L = 52, R = o.traces.some((t) => t.right) ? 46 : 12, T = 10, B = 28;
+  const W = o.width || 360, H = o.height || 220, L = 52, R = o.traces.some((t) => t.right) ? 46 : 12, T = 18, B = o.showX === false ? 8 : 28;
   const pw = W - L - R, ph = H - T - B;
   const all = o.traces.flatMap((t) => t.x);
   let x0 = o.xRange ? o.xRange[0] : Math.min(...all), x1 = o.xRange ? o.xRange[1] : Math.max(...all);
@@ -42,14 +44,15 @@ export function plotSvg(o) {
   out.push(`<rect x="${L}" y="${T}" width="${pw}" height="${ph}" class="plot-bg"/>`);
   // 目盛り
   const xt = o.xLog ? logTicks(x0, x1) : niceTicks(x0, x1, 5).ticks.filter(inX);
-  for (const v of xt) { const X = sx(v); out.push(`<line x1="${X}" y1="${T}" x2="${X}" y2="${T + ph}" class="plot-grid"/><text x="${X}" y="${H - 10}" class="plot-tick" text-anchor="middle">${formatValue(v, '', 3)}</text>`); }
+  for (const v of xt) { const X = sx(v); out.push(`<line x1="${X}" y1="${T}" x2="${X}" y2="${T + ph}" class="plot-grid"/>${o.showX === false ? '' : `<text x="${X}" y="${H - 10}" class="plot-tick" text-anchor="middle">${formatValue(v, '', 3)}</text>`}`); }
   if (yl) { const sy = syOf(yl); for (const v of yl.ticks) { const Y = sy(v); out.push(`<line x1="${L}" y1="${Y}" x2="${L + pw}" y2="${Y}" class="plot-grid"/><text x="${L - 4}" y="${Y + 3}" class="plot-tick" text-anchor="end">${formatValue(v, '', 3)}</text>`); } }
   if (y2) { const sy = syOf(y2); for (const v of y2.ticks) out.push(`<text x="${L + pw + 4}" y="${sy(v) + 3}" class="plot-tick">${formatValue(v, '', 3)}</text>`); }
-  out.push(`<text x="${L + pw}" y="${H - 1}" class="plot-unit" text-anchor="end">${o.xUnit || ''}</text>`);
-  if (o.yUnit) out.push(`<text x="2" y="${T + 8}" class="plot-unit">${o.yUnit}</text>`);
+  if (o.showX !== false) out.push(`<text x="${L + pw}" y="${H - 1}" class="plot-unit" text-anchor="end">${o.xUnit || ''}</text>`);
+  if (o.yUnit) out.push(`<text x="2" y="${T - 6}" class="plot-unit">${o.yUnit}</text>`);
   if (o.y2Unit && y2) out.push(`<text x="${W - 2}" y="${T + 8}" class="plot-unit" text-anchor="end">${o.y2Unit}</text>`);
   // 線（多いときは画面の 1 ドットに 1 点まで間引く。最大・最小は残す）
-  out.push(`<clipPath id="pc"><rect x="${L}" y="${T}" width="${pw}" height="${ph}"/></clipPath><g clip-path="url(#pc)">`);
+  const cid = `pc-${o.id || 'p'}`;
+  out.push(`<clipPath id="${cid}"><rect x="${L}" y="${T}" width="${pw}" height="${ph}"/></clipPath><g clip-path="url(#${cid})">`);
   o.traces.forEach((t, k) => {
     const r = t.right ? y2 : yl;
     if (!r) return;
@@ -59,10 +62,14 @@ export function plotSvg(o) {
     out.push(`<path d="${d}" fill="none" stroke="${t.color || COLORS[k % COLORS.length]}" stroke-width="1.6"${t.dash ? ' stroke-dasharray="4 3"' : ''}/>`);
   });
   out.push('</g>');
-  if (o.cursor != null && inX(o.cursor)) { const X = sx(o.cursor); out.push(`<line x1="${X}" y1="${T}" x2="${X}" y2="${T + ph}" class="plot-cursor"/>`); }
-  if (o.cursor2 != null && inX(o.cursor2)) { const X = sx(o.cursor2); out.push(`<line x1="${X}" y1="${T}" x2="${X}" y2="${T + ph}" class="plot-cursor b"/>`); }
+  const map = { L, pw, x0, x1, log: !!o.xLog, W };
+  // カーソル（つまみ付き。つまみの文字 A・B）
+  for (const [x, cls, label] of [[o.cursor, 'a', 'A'], [o.cursor2, 'b', 'B']]) {
+    const vis = x != null && inX(x);
+    out.push(`<g class="plot-cur ${cls}" data-cur="${cls}" transform="translate(${vis ? plotPxAt(map, x).toFixed(1) : -99},0)"${vis ? '' : ' style="display:none"'}><line x1="0" y1="${T}" x2="0" y2="${T + ph}" class="plot-cursor ${cls}"/><rect x="-8" y="${T - 15}" width="16" height="14" rx="3" class="plot-cur-tab"/><text x="0" y="${T - 4}" text-anchor="middle" class="plot-cur-label">${label}</text></g>`);
+  }
   out.push('</svg>');
-  return { svg: out.join(''), map: { L, pw, x0, x1, log: !!o.xLog, W } };
+  return { svg: out.join(''), map };
 }
 
 function decimate(xs, ys, sx, x0, x1, pw) {
@@ -79,6 +86,21 @@ function decimate(xs, ys, sx, x0, x1, pw) {
   }
   flush();
   return out;
+}
+
+/** データの x → 画面の x（px。viewBox の座標） */
+export function plotPxAt(map, x) {
+  const lx = (v) => (map.log ? Math.log10(Math.max(v, 1e-30)) : v);
+  return map.L + ((lx(x) - lx(map.x0)) / (lx(map.x1) - lx(map.x0) || 1)) * map.pw;
+}
+
+/** 描いたグラフのカーソルだけを動かす（ドラッグ中。SVG を作り直さないのでポインタのつかみが切れない） */
+export function moveCursor(svg, map, which, x) {
+  const g = svg.querySelector(`[data-cur="${which}"]`);
+  if (!g) return;
+  const inX = x != null && x >= Math.min(map.x0, map.x1) && x <= Math.max(map.x0, map.x1);
+  g.style.display = inX ? '' : 'none';
+  if (inX) g.setAttribute('transform', `translate(${plotPxAt(map, x).toFixed(1)},0)`);
 }
 
 /** 画面の x（px）→ データの x */

@@ -179,3 +179,14 @@ test('電圧源の並列・ループは計算の前に名前を挙げて止め�
     await runSimulation(q);
   }
 });
+
+test('グラフ: データの x と画面の x は行き来でき（対数軸も）、カーソルはいつも要素を置く', async () => {
+  const { plotSvg, plotPxAt, plotXAt } = await import('../js/sim/plot.js');
+  for (const xLog of [false, true]) {
+    const r = plotSvg({ traces: [{ name: 'V(a)', x: [10, 100, 1000, 1e4], y: [1, 2, 3, 4] }], xLog, cursor: 100, id: `t${xLog}` });
+    for (const x of [10, 55, 100, 3000, 1e4]) assert.ok(Math.abs(plotXAt(r.map, plotPxAt(r.map, x)) / x - 1) < 1e-9);
+    assert.match(r.svg, /data-cur="a" transform="translate\(/);
+    assert.match(r.svg, /data-cur="b"[^>]*style="display:none"/);
+    assert.match(r.svg, new RegExp(`clipPath id="pc-t${xLog}"`));
+  }
+});

@@ -7,7 +7,7 @@ import { simSettings, buildCircuit, exportSpice, SIM_KINDS, GROUND, defaultPins 
 import { runSimulation } from './run.js';
 import { builtinChoices } from './models.js';
 import { formatValue, parseValue } from './units.js';
-import { plotSvg, plotXAt, valueAt, measure, fft, COLORS } from './plot.js';
+import { plotSvg, plotXAt, plotPxAt, moveCursor, valueAt, measure, fft, COLORS } from './plot.js';
 
 const TYPES = [['op', '動作点'], ['dc', '直流スイープ'], ['ac', 'AC（周波数特性）'], ['tran', '過渡（時間波形）']];
 const WAVES = {
@@ -18,9 +18,18 @@ const WAVES = {
   exp: { label: '指数 EXP', p: ['初期 V1', '到達 V2', '遅れ1 TD1', '時定数1 TAU1', '遅れ2 TD2', '時定数2 TAU2'] },
 };
 const unitOf = (name) => (name.startsWith('V(') ? 'V' : 'A');
+const inner = (name) => name.replace(/^[VI]\((.*)\)$/, '$1');
+// グラフの段（量ごとに分ける。上から この順）
+const PANELS = {
+  V: { title: '電圧', unit: 'V' }, I: { title: '電流', unit: 'A' },
+  VdB: { title: '電圧の大きさ', unit: 'dB' }, IdB: { title: '電流の大きさ', unit: 'dB' },
+  Vmag: { title: '電圧の大きさ（倍）', unit: '' }, Imag: { title: '電流の大きさ（倍）', unit: '' },
+  ph: { title: '位相', unit: '°' }, Vfft: { title: 'FFT 電圧', unit: 'dB' }, Ifft: { title: 'FFT 電流', unit: 'dB' },
+};
 
 export function createSimView(ctx) {
   const st = { result: null, running: false, stop: false, cursor: null, cursor2: null, xRange: null, acView: 'db', fft: null, tune: null, error: '', progress: 0 };
+  let drag = null; // カーソルのドラッグ中の状態（下の「カーソルのドラッグ」）
   const P = () => ctx.getProject();
   const S = () => simSettings(P());
   const save = (fn, reason = 'sim') => ctx.mutate((p) => { p.sim = simSettings(p); fn(p.sim); }, reason);
@@ -76,39 +85,83 @@ export function createSimView(ctx) {
     let b;
     try { b = buildCircuit(P(), { netlist: ctx.getNetlist() }); } catch (e) { return `<p class="err">${esc(e.message)}</p>`; }
     const badge = (r) => (r.status === 'on' ? '<span class="ok">計算</span>' : r.status === 'error' ? '<span class="err">誤り</span>' : '<span class="muted">外す</span>');
-    return `<table class="sim-table"><tr><th>部品</th><th>値</th><th>モデル</th><th></th></tr>${b.rows.map((r) => `<tr data-model="${esc(r.compId)}"><td><button type="button" class="link">${esc(r.ref)}</button></td><td>${esc(r.value)}</td><td>${esc(r.model || '')}${r.note ? `<br><small class="${r.status === 'error' ? 'err' : 'muted'}">${esc(r.note)}</small>` : ''}</td><td>${badge(r)}</td></tr>`).join('')}</table>`;
+    return `<div class="sim-scroll"><table class="sim-table"><tr><th>部品</th><th>値</th><th>モデル</th><th></th></tr>${b.rows.map((r) => `<tr data-model="${esc(r.compId)}"><td><button type="button" class="link">${esc(r.ref)}</button></td><td>${esc(r.value)}</td><td>${esc(r.model || '')}${r.note ? `<br><small class="${r.status === 'error' ? 'err' : 'muted'}">${esc(r.note)}</small>` : ''}</td><td>${badge(r)}</td></tr>`).join('')}</table></div>`;
   }
 
   // ---------------- 結果 ----------------
+  /** 信号の色（選んだ順で決まる。ボタンの印とグラフの線で同じ） */
+  const colorOf = (name) => { const k = S().probes.indexOf(name); return k < 0 ? null : COLORS[k % COLORS.length]; };
+
   function seriesOf(r) {
-    // 選んだ信号 → [{ name, x, y, right }]
-    const s = S();
-    const probes = s.probes.filter((p) => r.names.includes(p));
+    // 選んだ信号 → [{ name, x, y, color, panel, unit, dash }]。panel は量（電圧・電流・位相…）で分ける
+    const probes = S().probes.filter((p) => r.names.includes(p));
     const out = [];
-    probes.forEach((name, k) => {
-      const i = r.names.indexOf(name), color = COLORS[k % COLORS.length];
+    for (const name of probes) {
+      const i = r.names.indexOf(name), color = colorOf(name), q = name.startsWith('I(') ? 'I' : 'V';
       if (r.dc) {
         for (const [g, grp] of r.dc.groups.entries()) {
           const end = r.dc.groups[g + 1]?.start ?? r.dc.x.length;
-          out.push({ name: grp.value == null ? name : `${name} @${formatValue(grp.value)}`, x: r.dc.x.slice(grp.start, end), y: r.dc.y[i].slice(grp.start, end), color, dash: g % 2 === 1 });
+          out.push({ name: grp.value == null ? name : `${name} @${formatValue(grp.value)}`, x: r.dc.x.slice(grp.start, end), y: r.dc.y[i].slice(grp.start, end), color, dash: g % 2 === 1, panel: q, unit: unitOf(name) });
         }
       } else if (r.ac) {
         const re = r.ac.re[i], im = r.ac.im[i];
         const mag = re.map((x, j) => Math.hypot(x, im[j]));
-        if (st.acView === 'db' || st.acView === 'both') out.push({ name: `${name} dB`, x: r.ac.f, y: mag.map((m) => 20 * Math.log10(Math.max(m, 1e-30))), color });
-        if (st.acView === 'mag') out.push({ name: `|${name}|`, x: r.ac.f, y: mag, color });
+        if (st.acView === 'db' || st.acView === 'both') out.push({ name: `${name} dB`, x: r.ac.f, y: mag.map((m) => 20 * Math.log10(Math.max(m, 1e-30))), color, panel: `${q}dB`, unit: 'dB' });
+        if (st.acView === 'mag') out.push({ name: `|${name}|`, x: r.ac.f, y: mag, color, panel: `${q}mag`, unit: '' });
         if (st.acView === 'phase' || st.acView === 'both') {
           // 位相は ±180° を越えてつなぐ
           let prev = null;
           const ph = re.map((x, j) => { let p = (Math.atan2(im[j], x) * 180) / Math.PI; if (prev != null) { while (p - prev > 180) p -= 360; while (p - prev < -180) p += 360; } prev = p; return p; });
-          out.push({ name: `${name} 位相°`, x: r.ac.f, y: ph, color, right: st.acView === 'both', dash: st.acView === 'both' });
+          out.push({ name: `${name} 位相`, x: r.ac.f, y: ph, color, panel: 'ph', unit: '°' });
         }
       } else if (r.tran) {
-        if (st.fft) out.push({ name: `FFT ${name} dB`, x: st.fft[name].f.slice(1), y: st.fft[name].db.slice(1), color });
-        else out.push({ name, x: r.tran.t, y: r.tran.y[i], color });
+        if (st.fft) { if (st.fft[name]) out.push({ name: `FFT ${name}`, x: st.fft[name].f.slice(1), y: st.fft[name].db.slice(1), color, panel: `${q}fft`, unit: 'dB' }); }
+        else out.push({ name, x: r.tran.t, y: r.tran.y[i], color, panel: q, unit: unitOf(name) });
       }
-    });
+    }
     return out;
+  }
+
+  /** 段ごとのグラフ（x 軸・カーソル・拡大はすべての段で共通） */
+  function plotsHtml(r, series) {
+    const keys = Object.keys(PANELS).filter((k) => series.some((t) => t.panel === k));
+    if (!keys.length) { st.plotMaps = []; return '<p class="note">下の「表示する信号」で選んでください</p>'; }
+    const xUnit = r.dc ? r.dc.src : r.ac || st.fft ? 'Hz' : 's';
+    const width = Math.min(900, Math.max(320, ctx.root.clientWidth - 24));
+    const h = keys.length === 1 ? 240 : keys.length === 2 ? 180 : 150;
+    st.plotMaps = [];
+    return keys.map((k, n) => {
+      const last = n === keys.length - 1;
+      const pl = plotSvg({ traces: series.filter((t) => t.panel === k), xLog: !!r.ac || !!st.fft, xUnit, yUnit: '', xRange: st.xRange, cursor: st.cursor, cursor2: st.cursor2, width, height: last ? h + 20 : h, id: k, showX: last });
+      st.plotMaps.push(pl.map);
+      return `<div class="sim-panel" data-panel="${k}"><div class="sim-panel-h">${PANELS[k].title}${PANELS[k].unit ? `（${PANELS[k].unit}）` : ''}</div>${pl.svg}</div>`;
+    }).join('');
+  }
+
+  /** カーソルの値の表（ドラッグ中はこれだけ書き換える） */
+  function cursorHtml(r, series) {
+    if (st.cursor == null || !series.length) return '';
+    const xu = r.ac || st.fft ? 'Hz' : r.tran ? 's' : '';
+    const c2 = st.cursor2;
+    return `<div class="sim-scroll"><table class="sim-table"><tr><th>信号</th><th><span class="cur-key a">A</span> ${formatValue(st.cursor, xu)}</th>${c2 != null ? `<th><span class="cur-key b">B</span> ${formatValue(c2, xu)}</th><th>B−A</th>` : ''}</tr>${c2 != null ? `<tr class="muted"><td>${r.tran ? '時間差' : '差'}</td><td></td><td></td><td class="num">${formatValue(c2 - st.cursor, xu, 4)}${r.tran && c2 !== st.cursor ? `（${formatValue(1 / Math.abs(c2 - st.cursor), 'Hz', 3)}）` : ''}</td></tr>` : ''}${series.map((t) => {
+      const a = valueAt(t.x, t.y, st.cursor), b = c2 != null ? valueAt(t.x, t.y, c2) : null;
+      return `<tr><td><i class="dot" style="background:${t.color}"></i>${esc(t.name)}</td><td class="num">${formatValue(a, t.unit, 4)}</td>${b != null ? `<td class="num">${formatValue(b, t.unit, 4)}</td><td class="num">${formatValue(b - a, t.unit, 4)}</td>` : ''}</tr>`;
+    }).join('')}</table></div>`;
+  }
+
+  /**
+   * 表示する信号のボタン（1 種類のボタンに統一）。電圧はネット、電流は部品で分ける。
+   * 上の段は表示中の信号（線と同じ色の印。凡例を兼ね、触れると外す）。下の 2 つの組は折りたたみ（絞り込むと開く）
+   */
+  function signalsHtml(r) {
+    const chip = (n) => { const c = colorOf(n); return `<button type="button" class="chip sig${c ? ' on' : ''}" data-probe="${esc(n)}"><i class="dot" style="background:${c || 'transparent'}"></i>${esc(inner(n))}</button>`; };
+    const vs = r.names.filter((n) => n.startsWith('V(')), is = r.names.filter((n) => n.startsWith('I('));
+    const on = S().probes.filter((p) => r.names.includes(p));
+    const grp = (key, title, list) => `<details class="sig-group" data-g="${key}"${st.openGroups?.has(key) ? ' open' : ''}><summary class="sig-h">${title}（${list.length}）</summary><div class="chips">${list.map(chip).join('')}</div></details>`;
+    return `<details class="sim-probes" open><summary>表示する信号（${on.length}）</summary>
+      <div class="chips sig-on">${on.length ? on.map((n) => chip(n).replace('data-probe=', 'data-on="1" data-probe=')).join('') : '<span class="note">下の組から選んでください</span>'}</div>
+      <div class="sig-tools"><input type="search" class="sim-filter" placeholder="名前で絞り込み（例: OUT、R1）" value="${esc(st.filter || '')}">${on.length ? '<button type="button" class="chip" data-act="probesclear">すべて外す</button>' : ''}</div>
+      ${grp('V', '電圧（ネット）', vs)}${is.length ? grp('I', '電流（部品）', is) : ''}</details>`;
   }
 
   function resultHtml() {
@@ -124,51 +177,37 @@ export function createSimView(ctx) {
       const fmtDev = (d) => (d.type === 'R' ? `I ${formatValue(d.i, 'A')}・P ${formatValue(d.p, 'W')}` : d.type === 'D' ? `Vd ${formatValue(d.vd, 'V')}・I ${formatValue(d.i, 'A')}・P ${formatValue(d.p, 'W')}`
         : d.type === 'Q' ? `Vbe ${formatValue(d.vbe, 'V')}・Vce ${formatValue(d.vce, 'V')}・Ic ${formatValue(d.ic, 'A')}・Ib ${formatValue(d.ib, 'A')}・P ${formatValue(d.p, 'W')}`
           : d.type === 'M' ? `Vgs ${formatValue(d.vgs, 'V')}・Vds ${formatValue(d.vds, 'V')}・Id ${formatValue(d.id, 'A')}・P ${formatValue(d.p, 'W')}` : `I ${formatValue(d.i, 'A')}・供給 ${formatValue(d.p, 'W')}`);
-      return head + warn + `<h4>ネットの電圧</h4><table class="sim-table">${nodes.map(([n, v]) => `<tr><td>${esc(n)}</td><td class="num">${formatValue(v, 'V', 5)}</td></tr>`).join('')}</table>
-        <h4>部品</h4><table class="sim-table">${devs.map((d) => `<tr><td>${esc(d.name)}</td><td>${esc(fmtDev(d))}</td></tr>`).join('')}</table>`;
+      return head + warn + `<h4>ネットの電圧</h4><div class="sim-scroll"><table class="sim-table">${nodes.map(([n, v]) => `<tr><td>${esc(n)}</td><td class="num">${formatValue(v, 'V', 5)}</td></tr>`).join('')}</table></div>
+        <h4>部品</h4><div class="sim-scroll"><table class="sim-table">${devs.map((d) => `<tr><td>${esc(d.name)}</td><td>${esc(fmtDev(d))}</td></tr>`).join('')}</table></div>`;
     }
     const series = seriesOf(r);
-    const xUnit = r.dc ? `${r.dc.src}（${r.names.some((n) => n === `I(${r.dc.src})`) ? 'V/A' : ''}）` : r.ac ? 'Hz' : st.fft ? 'Hz' : 's';
-    const yUnit = r.ac ? (st.acView === 'mag' ? '' : st.acView === 'phase' ? '°' : 'dB') : st.fft ? 'dB' : series.every((t) => t.name.startsWith('V(')) ? 'V' : series.every((t) => t.name.startsWith('I(')) ? 'A' : '';
-    const pl = series.length ? plotSvg({ traces: series, xLog: !!r.ac || !!st.fft, xUnit, yUnit, y2Unit: st.acView === 'both' ? '°' : '', xRange: st.xRange, cursor: st.cursor, cursor2: st.cursor2, width: Math.min(900, Math.max(320, ctx.root.clientWidth - 24)), height: 240 }) : null;
-    st.plotMap = pl?.map;
-    const legend = series.map((t) => `<span class="legend"><i style="background:${t.color}"></i>${esc(t.name)}</span>`).join('');
-    // カーソルの値・測定
-    let cur = '';
-    if (st.cursor != null && series.length) {
-      const c2 = st.cursor2;
-      cur = `<table class="sim-table"><tr><th>信号</th><th>A ${formatValue(st.cursor, r.ac || st.fft ? 'Hz' : r.tran ? 's' : '')}</th>${c2 != null ? `<th>B ${formatValue(c2, r.ac || st.fft ? 'Hz' : r.tran ? 's' : '')}</th><th>B−A</th>` : ''}</tr>${series.map((t) => {
-        const a = valueAt(t.x, t.y, st.cursor), b = c2 != null ? valueAt(t.x, t.y, c2) : null;
-        return `<tr><td>${esc(t.name)}</td><td class="num">${formatValue(a, '', 5)}</td>${b != null ? `<td class="num">${formatValue(b, '', 5)}</td><td class="num">${formatValue(b - a, '', 5)}</td>` : ''}</tr>`;
-      }).join('')}</table>`;
-    }
+    st.series = series; // ドラッグ中の表はこれを使う（毎回作り直さない）
+    const plots = plotsHtml(r, series);
     let meas = '';
     if (r.tran && !st.fft && series.length) {
       const [a, b] = st.xRange || [-Infinity, Infinity];
-      meas = `<h4>測定（表示している範囲）</h4><table class="sim-table"><tr><th>信号</th><th>最小</th><th>最大</th><th>P-P</th><th>平均</th><th>実効値</th><th>周波数</th></tr>${series.map((t) => {
-        const m = measure(t.x, t.y, a, b), u = unitOf(t.name);
-        return `<tr><td>${esc(t.name)}</td><td class="num">${formatValue(m.min, u)}</td><td class="num">${formatValue(m.max, u)}</td><td class="num">${formatValue(m.pp, u)}</td><td class="num">${formatValue(m.avg, u)}</td><td class="num">${formatValue(m.rms, u)}</td><td class="num">${Number.isFinite(m.freq) ? formatValue(m.freq, 'Hz') : '—'}</td></tr>`;
-      }).join('')}</table>`;
+      meas = `<h4>測定（表示している範囲）</h4><div class="sim-scroll"><table class="sim-table"><tr><th>信号</th><th>最小</th><th>最大</th><th>P-P</th><th>平均</th><th>実効値</th><th>周波数</th></tr>${series.map((t) => {
+        const m = measure(t.x, t.y, a, b), u = t.unit;
+        return `<tr><td><i class="dot" style="background:${t.color}"></i>${esc(t.name)}</td><td class="num">${formatValue(m.min, u)}</td><td class="num">${formatValue(m.max, u)}</td><td class="num">${formatValue(m.pp, u)}</td><td class="num">${formatValue(m.avg, u)}</td><td class="num">${formatValue(m.rms, u)}</td><td class="num">${Number.isFinite(m.freq) ? formatValue(m.freq, 'Hz') : '—'}</td></tr>`;
+      }).join('')}</table></div>`;
     }
     if (r.ac && series.length) {
       // −3dB の周波数（最初の点から 3dB 下がる所）
-      meas = `<h4>測定</h4><table class="sim-table"><tr><th>信号</th><th>最大</th><th>その周波数</th><th>−3dB の周波数</th></tr>${S().probes.filter((p) => r.names.includes(p)).map((name) => {
+      meas = `<h4>測定</h4><div class="sim-scroll"><table class="sim-table"><tr><th>信号</th><th>最大</th><th>その周波数</th><th>−3dB の周波数</th></tr>${S().probes.filter((p) => r.names.includes(p)).map((name) => {
         const i = r.names.indexOf(name), mag = r.ac.re[i].map((x, j) => 20 * Math.log10(Math.max(Math.hypot(x, r.ac.im[i][j]), 1e-30)));
         let k = 0; mag.forEach((m, j) => { if (m > mag[k]) k = j; });
         const lim = mag[k] - 3; let lo = NaN, hi = NaN;
         for (let j = k; j > 0; j--) if (mag[j - 1] < lim) { lo = r.ac.f[j - 1] + ((lim - mag[j - 1]) / (mag[j] - mag[j - 1])) * (r.ac.f[j] - r.ac.f[j - 1]); break; }
         for (let j = k; j < mag.length - 1; j++) if (mag[j + 1] < lim) { hi = r.ac.f[j] + ((mag[j] - lim) / (mag[j] - mag[j + 1])) * (r.ac.f[j + 1] - r.ac.f[j]); break; }
-        return `<tr><td>${esc(name)}</td><td class="num">${mag[k].toFixed(2)}dB</td><td class="num">${formatValue(r.ac.f[k], 'Hz')}</td><td class="num">${[lo, hi].filter(Number.isFinite).map((f) => formatValue(f, 'Hz')).join(' / ') || '—'}</td></tr>`;
-      }).join('')}</table>`;
+        return `<tr><td><i class="dot" style="background:${colorOf(name)}"></i>${esc(name)}</td><td class="num">${mag[k].toFixed(2)}dB</td><td class="num">${formatValue(r.ac.f[k], 'Hz')}</td><td class="num">${[lo, hi].filter(Number.isFinite).map((f) => formatValue(f, 'Hz')).join(' / ') || '—'}</td></tr>`;
+      }).join('')}</table></div>`;
     }
-    const probeChips = r.names.map((n) => `<button type="button" class="chip${S().probes.includes(n) ? ' on' : ''}" data-probe="${esc(n)}">${esc(n)}</button>`).join('');
     const viewChips = r.ac ? ['db', 'phase', 'both', 'mag'].map((v) => `<button type="button" class="chip${st.acView === v ? ' on' : ''}" data-acview="${v}">${{ db: '大きさ dB', phase: '位相', both: 'dB＋位相', mag: '大きさ（倍）' }[v]}</button>`).join('') : r.tran ? `<button type="button" class="chip${st.fft ? ' on' : ''}" data-act="fft">FFT</button>` : '';
-    const zoom = `<button type="button" class="chip" data-act="zoomin">カーソルの間を拡大</button><button type="button" class="chip" data-act="zoomall">全体</button><button type="button" class="chip" data-act="csv">CSV 書出</button>`;
-    return head + warn + `<div class="sim-plotwrap" data-plot>${pl ? pl.svg : '<p class="note">下の一覧から信号を選んでください</p>'}</div>
-      <div class="legend-row">${legend}</div>
-      <p class="note">グラフをタップ: カーソル A、もう一度: B（3 回目で A に戻る）</p>
-      <div class="chips">${viewChips}${zoom}</div>${cur}${meas}
-      <details class="sim-probes" open><summary>信号を選ぶ（${S().probes.length}）</summary><input type="search" class="sim-filter" placeholder="名前で絞り込み（例: OUT、I(R）" value="${esc(st.filter || '')}"><div class="chips">${probeChips}</div></details>
+    const curChips = `<button type="button" class="chip" data-act="zoomin"${st.cursor2 == null ? ' disabled' : ''}>A〜B を拡大</button><button type="button" class="chip" data-act="zoomall"${st.xRange ? '' : ' disabled'}>全体</button><button type="button" class="chip" data-act="curclear"${st.cursor == null ? ' disabled' : ''}>カーソルを消す</button><button type="button" class="chip" data-act="csv">CSV 書出</button>`;
+    return head + warn + `<div class="sim-plotwrap" data-plot>${plots}</div>
+      <p class="note sim-hint">グラフに触れると A、もう一度で B。<b>A・B は指で左右にドラッグ</b>できます（近い方が動きます）</p>
+      <div class="chips">${viewChips}${curChips}</div><div class="sim-curtab">${cursorHtml(r, series)}</div>${meas}
+      ${signalsHtml(r)}
       ${tuneHtml()}`;
   }
 
@@ -187,6 +226,7 @@ export function createSimView(ctx) {
   // ---------------- 描画 ----------------
   function render() {
     const root = ctx.root;
+    drag = null; // 描き直すと前のグラフの要素は無くなる
     const p = P();
     if (!p) { root.innerHTML = ''; return; }
     const s = S();
@@ -194,12 +234,13 @@ export function createSimView(ctx) {
       <div class="seg">${TYPES.map(([k, l]) => `<button type="button" class="chip${s.analysis.type === k ? ' on' : ''}" data-type="${k}">${l}</button>`).join('')}</div>
       <div class="sim-an">${analysisForm(s)}</div>
       <div class="sim-actions"><button type="button" class="btn primary" data-act="run">${st.running ? '中止' : '▶ 実行'}</button><button type="button" class="btn" data-act="addsrc">＋ 信号源</button><button type="button" class="btn" data-act="spice">SPICE 書出</button></div>
-      <details class="sim-sec" open><summary>信号源（${s.sources.length}）</summary>${sourcesHtml(s)}</details>
       <div class="sim-result">${resultHtml()}</div>
+      <details class="sim-sec"${s.sources.length ? '' : ' open'}><summary>信号源（${s.sources.length}）${s.sources.length ? `<span class="muted sum-note">${esc(s.sources.map((x) => x.name).join('・'))}</span>` : ''}</summary>${sourcesHtml(s)}</details>
       <details class="sim-sec"><summary>部品のモデル</summary><p class="note">回路図の部品を値・型番からモデルにします。部品をタップすると、内蔵モデルの選択・SPICE モデルの割り当て・計算から外す、を選べます。IC・コネクタはモデルを割り当てたときだけ計算に入ります。</p>${modelsHtml()}</details>
       <details class="sim-sec"><summary>ライブラリ（SPICE の .model・.subckt）</summary><p class="note">メーカーの SPICE モデルを貼ります（ダイオード・バイポーラ・MOSFET レベル 1 の .model と、R C L V I E G D Q M X だけでできた .subckt）。部品のモデルで「SPICE」を選び、名前を入れると使えます。</p><textarea class="sim-lib" rows="6" spellcheck="false" placeholder=".model D1N4148 D(IS=2.52n N=1.752 RS=0.568)">${esc(s.lib)}</textarea><button type="button" class="btn small" data-act="savelib">ライブラリを保存</button></details>
       <p class="note">計算は端末の中だけで行います（SPICE と同じ修正節点解析・ニュートン法・台形則）。モデルは近似なので、実機・データシートで確かめてください。</p>
     </div>`;
+    if (st.filter) applyFilter();
   }
 
   // ---------------- 操作 ----------------
@@ -285,9 +326,8 @@ export function createSimView(ctx) {
   }
 
   async function onClick(ev) {
-    const t = ev.target.closest('button, [data-plot] svg');
-    if (!t) return;
-    if (t.matches('svg')) { plotTap(ev); return; }
+    const t = ev.target.closest('button');
+    if (!t || t.disabled) return;
     if (t.dataset.type) { save((sim) => { sim.analysis.type = t.dataset.type; }); st.result = null; render(); return; }
     if (t.dataset.src != null) { await editSource(Number(t.dataset.src)); return; }
     const tr = t.closest('[data-model]');
@@ -328,6 +368,8 @@ export function createSimView(ctx) {
         break;
       }
       case 'zoomall': st.xRange = null; render(); break;
+      case 'curclear': st.cursor = null; st.cursor2 = null; render(); break;
+      case 'probesclear': save((sim) => { sim.probes = []; }, 'sim:probes'); st.fft = null; render(); break;
       case 'csv': exportCsv(); break;
       case 'tuneapply': {
         const tn = st.tune;
@@ -343,15 +385,83 @@ export function createSimView(ctx) {
     }
   }
 
-  function plotTap(ev) {
-    const svg = ev.target.closest('svg');
-    if (!svg || !st.plotMap) return;
+  function applyFilter() {
+    const f = (st.filter || '').toLowerCase();
+    ctx.root.querySelectorAll('.sig-group [data-probe]').forEach((b) => { b.hidden = !!f && !b.dataset.probe.toLowerCase().includes(f); });
+    ctx.root.querySelectorAll('.sig-group').forEach((g) => { const any = !!g.querySelector('[data-probe]:not([hidden])'); g.hidden = !!f && !any; if (f && any) g.open = true; });
+    // 絞り込みを消したら、そのとき開いている組を覚える（描き直しで閉じない）
+    if (!f) st.openGroups = new Set([...ctx.root.querySelectorAll('.sig-group[open]')].map((g) => g.dataset.g));
+  }
+
+  // ---------------- カーソルのドラッグ ----------------
+  // 触れた所にカーソルを置き、そのまま指を動かすと付いてくる。A・B の両方があるときは近い方を動かす。
+  // ドラッグ中は SVG を作り直さず、カーソルの位置と値の表だけを書き換える（つかみが切れない・軽い）
+  // 触れ方: つまみ（今のカーソル）の近くに触れたら、すぐにドラッグ。
+  // それ以外は「待ち」: 動かさずに離せばそこに置く（タップ）、横に動かせばそこに置いてドラッグ、
+  // 縦に動かせば画面のスクロール（ブラウザが pointercancel を送る）で、カーソルは変えない
+  const GRAB = 28, SLOP = 8; // 画面の px
+  function plotDown(ev) {
+    const svg = ev.target.closest('.sim-plot');
+    if (!svg || !st.plotMaps?.length || !st.result || st.result.op) return;
+    if (ev.button != null && ev.button > 0) return;
+    const map = st.plotMaps[0];
     const rc = svg.getBoundingClientRect();
-    const px = ((ev.clientX - rc.left) / rc.width) * st.plotMap.W;
-    const x = plotXAt(st.plotMap, px);
-    if (st.cursor == null || (st.cursor != null && st.cursor2 != null)) { st.cursor = x; st.cursor2 = null; }
-    else st.cursor2 = x;
-    render();
+    const px = ((ev.clientX - rc.left) / rc.width) * map.W;
+    if (px < map.L - 12 || px > map.L + map.pw + 12) return; // 目盛りの所は触れても何もしない
+    const scale = rc.width / map.W; // viewBox → 画面の px
+    const near = (c) => (c != null ? Math.abs(plotPxAt(map, c) - px) * scale : Infinity);
+    const dA = near(st.cursor), dB = near(st.cursor2);
+    const grab = Math.min(dA, dB) <= GRAB ? (dA <= dB ? 'a' : 'b') : null;
+    drag = { id: ev.pointerId, svg, x0: ev.clientX, y0: ev.clientY, prev: [st.cursor, st.cursor2], active: false, which: grab || (st.cursor == null || st.cursor2 != null ? 'a' : 'b') };
+    // 両方あるときにつまみ以外へ触れたら、近い方を動かす
+    if (!grab && st.cursor != null && st.cursor2 != null) drag.which = dA <= dB ? 'a' : 'b';
+    if (grab) { startDrag(ev); ev.preventDefault(); }
+  }
+  function xOf(ev) {
+    const map = st.plotMaps?.[0];
+    const svg = ctx.root.querySelector('.sim-plot');
+    if (!map || !svg) return null;
+    const rc = svg.getBoundingClientRect();
+    return plotXAt(map, ((ev.clientX - rc.left) / rc.width) * map.W);
+  }
+  function startDrag(ev) {
+    drag.active = true;
+    try { drag.svg.setPointerCapture(ev.pointerId); } catch { /* 古い WebView */ }
+    const x = xOf(ev); if (x != null) setCursor(drag.which, x);
+  }
+  let raf = 0;
+  function setCursor(which, x) {
+    if (which === 'a') st.cursor = x; else st.cursor2 = x;
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      ctx.root.querySelectorAll('.sim-plot').forEach((svg, k) => { const m = st.plotMaps[k] || st.plotMaps[0]; moveCursor(svg, m, 'a', st.cursor); moveCursor(svg, m, 'b', st.cursor2); });
+      const tab = ctx.root.querySelector('.sim-curtab');
+      if (tab && st.result) tab.innerHTML = cursorHtml(st.result, st.series || []);
+      const z = ctx.root.querySelector('[data-act="zoomin"]'); if (z) z.disabled = st.cursor2 == null;
+      const c = ctx.root.querySelector('[data-act="curclear"]'); if (c) c.disabled = st.cursor == null;
+    });
+  }
+  function plotMove(ev) {
+    if (!drag || ev.pointerId !== drag.id) return;
+    if (!drag.active) {
+      const dx = Math.abs(ev.clientX - drag.x0), dy = Math.abs(ev.clientY - drag.y0);
+      if (dx > SLOP && dx > dy) startDrag(ev); // 横に動かした → そこに置いてドラッグ
+      else return; // 縦ならスクロールに任せる
+    }
+    const x = xOf(ev); if (x != null) setCursor(drag.which, x);
+    ev.preventDefault();
+  }
+  function plotUp(ev) {
+    if (!drag || ev.pointerId !== drag.id) return;
+    const d = drag; drag = null;
+    try { d.svg.releasePointerCapture(ev.pointerId); } catch { /* 無視 */ }
+    if (ev.type === 'pointercancel') {
+      // スクロールに変わった: カーソルは触れる前に戻す
+      if (d.active) { st.cursor = d.prev[0]; st.cursor2 = d.prev[1]; setCursor('a', st.cursor); }
+      return;
+    }
+    if (!d.active && Math.hypot(ev.clientX - d.x0, ev.clientY - d.y0) <= SLOP) { const x = xOf(ev); if (x != null) setCursor(d.which, x); } // タップ
   }
 
   function onInput(ev) {
@@ -364,8 +474,7 @@ export function createSimView(ctx) {
     }
     if (t.classList.contains('sim-filter')) {
       st.filter = t.value;
-      const f = t.value.toLowerCase();
-      ctx.root.querySelectorAll('[data-probe]').forEach((b) => { b.hidden = !!f && !b.dataset.probe.toLowerCase().includes(f); });
+      applyFilter();
       return;
     }
     if (t.dataset.tune === 'ref') {
@@ -382,6 +491,16 @@ export function createSimView(ctx) {
   }
 
   ctx.root.addEventListener('click', (ev) => { onClick(ev).catch((e) => ctx.toast(e.message || String(e), true)); });
+  ctx.root.addEventListener('toggle', (ev) => {
+    const g = ev.target.closest?.('.sig-group');
+    if (!g || st.filter) return;
+    st.openGroups = st.openGroups || new Set();
+    if (g.open) st.openGroups.add(g.dataset.g); else st.openGroups.delete(g.dataset.g);
+  }, true);
+  ctx.root.addEventListener('pointerdown', plotDown);
+  ctx.root.addEventListener('pointermove', plotMove);
+  ctx.root.addEventListener('pointerup', plotUp);
+  ctx.root.addEventListener('pointercancel', plotUp);
   ctx.root.addEventListener('change', onInput);
   ctx.root.addEventListener('input', (ev) => { if (ev.target.classList.contains('sim-filter')) onInput(ev); });
 

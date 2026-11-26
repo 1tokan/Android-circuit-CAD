@@ -35,8 +35,7 @@ await step('信号源: サンプルの 2 つ。新しい信号源は空いたネ
   const pos = await page.locator('#dialog-body [name="pos"]').inputValue();
   assert.ok(!['VBUS', 'DAC_OUTL', 'GND'].includes(pos), pos);
   await dialog({ pos: 'VBUS', dc: '5' });
-  await page.waitForSelector('.toast', { hasText: /電圧源 VBUS_IN があります/ }).catch(() => {});
-  assert.match(await page.locator('body').textContent(), /電圧源 VBUS_IN があります/);
+  await page.waitForFunction(() => /電圧源 VBUS_IN があります/.test(document.body.textContent), null, { timeout: 5000 });
   await page.click('#dialog-actions button[value=""]').catch(() => {});
   assert.equal((await sim()).sources.length, 2);
 });
@@ -55,9 +54,19 @@ await step('過渡解析: 300ms を計算し、+5V_SYS が約 100ms で 4.5V（n
   await page.locator('[data-an="tran.tstop"]').fill('300m'); await page.locator('[data-an="tran.tstop"]').dispatchEvent('change');
   await tool('run');
   await page.waitForSelector('#sim-view .sim-plot');
-  // 信号を選ぶ
-  await page.evaluate(() => window.pocketEDA.mutateProject((p) => { p.sim.probes = ['V(VBUS)', 'V(+5V_SYS)', 'V(SYS_G)']; }, 'sim'));
-  await page.locator('#sim-view [data-act="zoomall"]').click();
+  // 電圧と電流は別の段のグラフ。サンプルは V(VBUS)・V(+5V_SYS)・V(SYS_G)・I(VBUS_IN) を最初から表示
+  assert.deepEqual(await page.locator('#sim-view .sim-panel-h').allTextContents(), ['電圧（V）', '電流（A）']);
+  // 表示する信号のボタン: 上に表示中（線と同じ色の印。触れると外す）、下に電圧（ネット）・電流（部品）の組
+  const heads = await page.locator('#sim-view .sig-h').allTextContents();
+  assert.match(heads[0], /^電圧（ネット）（\d+）$/); assert.match(heads[1], /^電流（部品）（\d+）$/);
+  assert.deepEqual(await page.locator('#sim-view .sig-on [data-probe]').evaluateAll((b) => b.map((x) => x.dataset.probe)), ['V(VBUS)', 'V(+5V_SYS)', 'V(SYS_G)', 'I(VBUS_IN)']);
+  await page.locator('#sim-view .sig-on [data-probe="I(VBUS_IN)"]').click();
+  assert.deepEqual(await page.locator('#sim-view .sim-panel-h').allTextContents(), ['電圧（V）']);
+  // 絞り込むと組が開く → 電流の組から選び直す
+  await page.locator('#sim-view .sim-filter').fill('VBUS_IN');
+  await page.locator('#sim-view .sig-group[data-g="I"] [data-probe="I(VBUS_IN)"]').click();
+  await page.locator('#sim-view .sim-filter').fill('');
+  assert.equal(await page.locator('#sim-view .sim-panel').count(), 2);
   const txt = await page.locator('#sim-view').textContent();
   assert.match(txt, /過渡・\d+ms・\d+ 点/);
   assert.match(txt, /測定（表示している範囲）/);
@@ -66,19 +75,49 @@ await step('過渡解析: 300ms を計算し、+5V_SYS が約 100ms で 4.5V（n
   await page.screenshot({ path: `${OUT}/sim-tran-phone.png`, fullPage: true });
 });
 
-await step('グラフをタップするとカーソル A・B と値の表、間を拡大できる', async () => {
-  const box = await page.locator('#sim-view .sim-plot').boundingBox();
-  await page.mouse.click(box.x + box.width * 0.3, box.y + box.height / 2);
-  await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
-  const txt = await page.locator('#sim-view').textContent();
-  assert.match(txt, /B−A/);
+await step('カーソル: 触れて A・B を置き、つまんでドラッグすると付いてくる。値の表も動き、A〜B を拡大できる', async () => {
+  await page.locator('#sim-view .sim-plot >> nth=0').scrollIntoViewIfNeeded();
+  const box = await page.locator('#sim-view .sim-plot >> nth=0').boundingBox();
+  const y = box.y + box.height / 2;
+  await page.mouse.click(box.x + box.width * 0.3, y);
+  await page.mouse.click(box.x + box.width * 0.6, y);
+  await page.waitForFunction(() => /B−A/.test(document.querySelector('#sim-view .sim-curtab')?.textContent || ''), null, { timeout: 5000 });
+  const bHead = async () => page.locator('#sim-view .sim-curtab th >> nth=2').textContent();
+  const before = await bHead();
+  // B をつまんで右へ
+  await page.mouse.move(box.x + box.width * 0.6, y);
+  await page.mouse.down();
+  for (let k = 1; k <= 8; k++) await page.mouse.move(box.x + box.width * (0.6 + k * 0.03), y);
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  const after = await bHead();
+  assert.notEqual(after, before);
+  // 2 段とも同じ位置にカーソル（電圧と電流のグラフ）
+  const xs = await page.$$eval('#sim-view .sim-plot [data-cur="b"]', (gs) => gs.map((g) => g.getAttribute('transform')));
+  assert.equal(xs.length, 2); assert.equal(xs[0], xs[1]);
+  // A をつまんで左へ（近い方が動く）
+  await page.mouse.move(box.x + box.width * 0.3, y); await page.mouse.down(); await page.mouse.move(box.x + box.width * 0.2, y); await page.mouse.up();
   await page.locator('#sim-view [data-act="zoomin"]').click();
-  assert.equal(await page.locator('#sim-view .plot-cursor').count(), 2);
+  assert.equal(await page.locator('#sim-view .sim-panel >> nth=0').locator('.plot-cur:visible').count(), 2);
+  await page.locator('#sim-view [data-act="zoomall"]').click();
+  // つまみから離れた所で縦に動かす（スクロール）→ カーソルは変わらない
+  const b2 = await page.locator('#sim-view .sim-plot >> nth=0').boundingBox();
+  const tr = async () => page.$$eval('#sim-view .sim-plot [data-cur]', (gs) => gs.map((g) => g.getAttribute('transform') + (g.style.display || '')).join('|'));
+  const t0 = await tr();
+  await page.mouse.move(b2.x + b2.width * 0.45, b2.y + 30); await page.mouse.down();
+  for (let k = 1; k <= 5; k++) await page.mouse.move(b2.x + b2.width * 0.45, b2.y + 30 + k * 10);
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  assert.equal(await tr(), t0);
+  await page.screenshot({ path: `${OUT}/sim-cursor-phone.png`, fullPage: true });
+  await page.locator('#sim-view [data-act="curclear"]').click();
+  assert.equal(await page.locator('#sim-view .sim-panel >> nth=0').locator('.plot-cur:visible').count(), 0);
+  assert.ok(await page.locator('#sim-view [data-act="zoomin"]').isDisabled());
 });
 
-await step('FFT に切り替えられる', async () => {
+await step('FFT に切り替えられる（電圧と電流は別の段）', async () => {
   await page.locator('#sim-view [data-act="fft"]').click();
-  assert.match(await page.locator('#sim-view .legend-row').textContent(), /FFT V\(\+5V_SYS\) dB/);
+  assert.deepEqual(await page.locator('#sim-view .sim-panel-h').allTextContents(), ['FFT 電圧（dB）', 'FFT 電流（dB）']);
   await page.locator('#sim-view [data-act="fft"]').click();
 });
 
