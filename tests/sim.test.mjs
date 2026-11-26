@@ -161,3 +161,21 @@ test('単位: SI の大文字 F はファラド、SPICE の f はフェムト。
   assert.equal(parseValue('1f', { spice: true }), 1e-15);
   assert.equal(parseValue('1MEG'), 1e6);
 });
+
+test('電圧源の並列・ループは計算の前に名前を挙げて止める（インダクタは直流で短絡として数える）', async () => {
+  const p = JSON.parse(fs.readFileSync(new URL('../samples/usb-dac-amp.json', import.meta.url), 'utf8'));
+  const S = (o) => ({ type: 'V', neg: 'GND', dc: '0', acMag: '', acPh: '', wave: { type: 'none', p: [] }, ...o });
+  p.sim.sources.push(S({ id: 'd', name: 'V2', pos: 'VBUS', dc: '5' }));
+  p.sim.analysis.type = 'op';
+  await assert.rejects(runSimulation(p), /電圧源がループ（または並列）になっています: VBUS_IN ・ V2/);
+  const sp = parseSpice('t\nV1 a 0 1\nL1 a b 1u\nV2 b 0 2\n.end');
+  assert.throws(() => new Simulator(toCircuit(flatten(sp))), /V1 ・ L1（インダクタ） ・ V2|L1（インダクタ）/);
+  // サンプルはそのままで 4 つの解析が動く
+  for (const t of ['op', 'tran', 'ac', 'dc']) {
+    const q = JSON.parse(fs.readFileSync(new URL('../samples/usb-dac-amp.json', import.meta.url), 'utf8'));
+    q.sim.analysis.type = t;
+    if (t === 'tran') q.sim.analysis.tran.tstop = '20m';
+    if (t === 'dc') q.sim.analysis.dc.step = '0.5';
+    await runSimulation(q);
+  }
+});

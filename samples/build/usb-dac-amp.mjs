@@ -380,6 +380,25 @@ M.zonefill.fillAllZones(pcb, rules);
 // ---------------- 検査・書き出し ----------------
 const drc = M.drc.runDrc(prj, pcb);
 const asm = M.asm.buildAssembly(prj, pcb, { boards: 5 });
+// シミュレーションの設定（docs/SIM_TEST.md の手順と同じ。開いてすぐ「計算」で動く）
+//  - VBUS_IN: USB を挿した瞬間（1ms で 0→5V）。過渡解析で突入電流と +5V_SYS の立ち上がり
+//  - VDAC: DAC の出力（AC 1V）。AC 解析で出力の RC（470Ω・2.2nF）の周波数特性
+const SRC = (o) => ({ type: 'V', neg: 'GND', dc: '0', acMag: '', acPh: '', wave: { type: 'none', p: [] }, ...o });
+prj.sim = {
+  analysis: {
+    type: 'tran',
+    dc: { src: 'VBUS_IN', start: '0', stop: '5', step: '0.05', src2: '', start2: '', stop2: '', step2: '' },
+    ac: { scale: 'dec', points: '20', fstart: '10', fstop: '10Meg' },
+    tran: { tstep: '100u', tstop: '300m', tstart: '0', tmax: '', uic: false },
+  },
+  sources: [
+    SRC({ id: 'src_vbus_in', name: 'VBUS_IN', pos: 'VBUS', wave: { type: 'pulse', p: ['0', '5', '1m', '100u', '1m', '1', '2'] } }),
+    SRC({ id: 'src_vdac', name: 'VDAC', pos: 'DAC_OUTL', acMag: '1' }),
+  ],
+  models: {},
+  lib: '',
+  probes: ['V(VBUS)', 'V(+5V_SYS)', 'V(SYS_G)', 'I(VBUS_IN)'],
+};
 prj.updatedAt = FIXED_TIME;
 const text = M.project.serializeProject(prj);
 const by = (r) => r.issues.reduce((m, i) => ((m[`${i.level}:${i.rule}`] = (m[`${i.level}:${i.rule}`] || 0) + 1), m), {});

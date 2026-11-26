@@ -211,7 +211,42 @@ export class Simulator {
     return this.nodeIndex.get(name);
   }
 
+  /**
+   * 電圧源（V・電池）とインダクタ（直流では短絡）だけでできたループを探す。
+   * ループがあると行列が解けない（ngspice も singular matrix で止まる）。ループの部品の名前を返す
+   */
+  voltageLoop() {
+    const adj = new Map();
+    const link = (a, b, name) => { for (const [x, y] of [[a, b], [b, a]]) { if (!adj.has(x)) adj.set(x, []); adj.get(x).push([y, name]); } };
+    const path = (from, to) => {
+      const prev = new Map([[from, null]]);
+      const q = [from];
+      while (q.length) {
+        const x = q.shift();
+        if (x === to) break;
+        for (const [y, name] of adj.get(x) || []) if (!prev.has(y)) { prev.set(y, [x, name]); q.push(y); }
+      }
+      if (!prev.has(to)) return null;
+      const names = [];
+      for (let x = to; prev.get(x); x = prev.get(x)[0]) names.push(prev.get(x)[1]);
+      return names.reverse();
+    };
+    for (const e of this.elements) {
+      if (e.internal || !['V', 'L'].includes(e.type)) continue;
+      const [a, b] = e.n.map(String);
+      const p = path(a, b);
+      if (p) return [...p, e.name];
+      link(a, b, e.name);
+    }
+    return null;
+  }
+
   setup() {
+    const loop = this.voltageLoop();
+    if (loop) {
+      const kinds = loop.map((n) => (this.elements.find((e) => e.name === n)?.type === 'L' ? `${n}（インダクタ）` : n));
+      throw new SimError(`電圧源がループ（または並列）になっています: ${kinds.join(' ・ ')}。同じネットに電圧源を 2 つつながないでください（信号源を消すか、ネットを変えてください）`);
+    }
     // 内部ノード（ダイオードの直列抵抗・オペアンプの内部）と、MOSFET のボディダイオード
     const extra = [];
     for (const e of this.elements) {

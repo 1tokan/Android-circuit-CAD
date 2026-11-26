@@ -22,17 +22,32 @@ await step('シミュ タブ: 画面が出て、ツール 3 つが使え、一�
   assert.ok(!(await page.locator('#stage-overlay').isVisible()));
   assert.equal(await page.locator('#toolbar .tool:not([disabled])').count(), 3);
   assert.equal(await page.locator('#ws-nav button[data-ws="sim"] .badge.partial').count(), 1);
-  assert.match(await page.locator('#sim-view').textContent(), /信号源がありません/);
+  // サンプルには信号源 2 つ（USB の立ち上がり・DAC の出力の AC）が入っていて、開いてすぐ計算できる
+  assert.match(await page.locator('#sim-view').textContent(), /信号源（2）/);
 });
 
-await step('信号源を追加（VBUS に 5V のパルス）', async () => {
-  await tool('source');
-  await dialog({ name: 'VBUS_IN', type: 'V', pos: 'VBUS', neg: 'GND', dc: '0', wtype: 'pulse', wp: '0 5 1m 100u 1m 1 2' });
-  await page.waitForFunction(() => window.pocketEDA.state.project.sim?.sources?.length === 1, null, { timeout: 5000 });
+await step('信号源: サンプルの 2 つ。新しい信号源は空いたネットが既定で、同じネットの電圧源は保存できない', async () => {
   const s = await sim();
-  assert.equal(s.sources.length, 1);
+  assert.deepEqual(s.sources.map((x) => x.name), ['VBUS_IN', 'VDAC']);
   assert.deepEqual(s.sources[0].wave, { type: 'pulse', p: ['0', '5', '1m', '100u', '1m', '1', '2'] });
   assert.match(await page.locator('#sim-view').textContent(), /VBUS_IN 電圧源 VBUS → GND/);
+  await tool('source');
+  const pos = await page.locator('#dialog-body [name="pos"]').inputValue();
+  assert.ok(!['VBUS', 'DAC_OUTL', 'GND'].includes(pos), pos);
+  await dialog({ pos: 'VBUS', dc: '5' });
+  await page.waitForSelector('.toast', { hasText: /電圧源 VBUS_IN があります/ }).catch(() => {});
+  assert.match(await page.locator('body').textContent(), /電圧源 VBUS_IN があります/);
+  await page.click('#dialog-actions button[value=""]').catch(() => {});
+  assert.equal((await sim()).sources.length, 2);
+});
+
+await step('電圧源のループは計算の前に名前を挙げて知らせる', async () => {
+  await page.evaluate(() => window.pocketEDA.mutateProject((p) => { p.sim.sources.push({ id: 'x', name: 'V9', type: 'V', pos: 'VBUS', neg: '+5V_SYS', dc: '0', acMag: '', acPh: '', wave: { type: 'none', p: [] } }, { id: 'y', name: 'V8', type: 'V', pos: '+5V_SYS', neg: 'GND', dc: '5', acMag: '', acPh: '', wave: { type: 'none', p: [] } }); }, 'sim'));
+  await page.locator('#sim-view [data-type="op"]').click();
+  await tool('run');
+  await page.waitForFunction(() => /電圧源がループ/.test(document.querySelector('#sim-view').textContent + document.body.textContent), null, { timeout: 10000 });
+  await page.evaluate(() => window.pocketEDA.mutateProject((p) => { p.sim.sources = p.sim.sources.filter((x) => !['V9', 'V8'].includes(x.name)); }, 'sim'));
+  await page.locator('#sim-view [data-type="tran"]').click();
 });
 
 await step('過渡解析: 300ms を計算し、+5V_SYS が約 100ms で 4.5V（ngspice と同じ）', async () => {
@@ -76,8 +91,6 @@ await step('動作点: 表にネットの電圧と部品の電流が出る', asy
 });
 
 await step('AC: DAC の出力の RC（470Ω・2.2nF）の −3dB が約 154kHz', async () => {
-  await tool('source');
-  await dialog({ name: 'VDAC', type: 'V', pos: 'DAC_OUTL', neg: 'GND', dc: '0', acMag: '1', wtype: 'none' });
   await page.locator('#sim-view [data-type="ac"]').click();
   await page.locator('[data-an="ac.fstop"]').fill('10M'); await page.locator('[data-an="ac.fstop"]').dispatchEvent('change');
   await page.evaluate(() => window.pocketEDA.mutateProject((p) => { p.sim.probes = ['V(LINE_L)']; }, 'sim'));

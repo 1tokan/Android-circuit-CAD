@@ -33276,5 +33276,79 @@
       "notes": []
     },
     "appliedAt": 1795392000000
+  },
+  "sim": {
+    "analysis": {
+      "type": "tran",
+      "dc": {
+        "src": "VBUS_IN",
+        "start": "0",
+        "stop": "5",
+        "step": "0.05",
+        "src2": "",
+        "start2": "",
+        "stop2": "",
+        "step2": ""
+      },
+      "ac": {
+        "scale": "dec",
+        "points": "20",
+        "fstart": "10",
+        "fstop": "10Meg"
+      },
+      "tran": {
+        "tstep": "100u",
+        "tstop": "300m",
+        "tstart": "0",
+        "tmax": "",
+        "uic": false
+      }
+    },
+    "sources": [
+      {
+        "type": "V",
+        "neg": "GND",
+        "dc": "0",
+        "acMag": "",
+        "acPh": "",
+        "wave": {
+          "type": "pulse",
+          "p": [
+            "0",
+            "5",
+            "1m",
+            "100u",
+            "1m",
+            "1",
+            "2"
+          ]
+        },
+        "id": "src_vbus_in",
+        "name": "VBUS_IN",
+        "pos": "VBUS"
+      },
+      {
+        "type": "V",
+        "neg": "GND",
+        "dc": "0",
+        "acMag": "1",
+        "acPh": "",
+        "wave": {
+          "type": "none",
+          "p": []
+        },
+        "id": "src_vdac",
+        "name": "VDAC",
+        "pos": "DAC_OUTL"
+      }
+    ],
+    "models": {},
+    "lib": "",
+    "probes": [
+      "V(VBUS)",
+      "V(+5V_SYS)",
+      "V(SYS_G)",
+      "I(VBUS_IN)"
+    ]
   }
 }

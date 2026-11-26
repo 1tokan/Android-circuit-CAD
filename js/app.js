@@ -27,7 +27,7 @@ import { esc } from './core/util.js';
 import { log as alog, logError, projectSummary, installErrorHooks, getLog, clearLog, formatLog, flushLog } from './core/applog.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.13.1';
 
 const state = {
   project: null,

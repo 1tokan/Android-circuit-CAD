@@ -205,7 +205,7 @@ export function createSimView(ctx) {
   // ---------------- 操作 ----------------
   async function editSource(i) {
     const s = S(), nets = netNames();
-    const src = i == null ? { id: `src${Date.now()}`, name: `V${s.sources.length + 1}`, type: 'V', pos: nets.find((n) => n !== GROUND) || '', neg: GROUND, dc: '0', acMag: '', acPh: '', wave: { type: 'none', p: [] } } : structuredClone(s.sources[i]);
+    const src = i == null ? { id: `src${Date.now()}`, name: `V${s.sources.length + 1}`, type: 'V', pos: nets.find((n) => n !== GROUND && !s.sources.some((x) => x.pos === n || x.neg === n)) || nets.find((n) => n !== GROUND) || '', neg: GROUND, dc: '0', acMag: '', acPh: '', wave: { type: 'none', p: [] } } : structuredClone(s.sources[i]);
     const netSel = (name, v) => `<select name="${name}">${nets.map((n) => `<option ${n === v ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
     const wtype = src.wave?.type || 'none';
     const html = `<div class="form">
@@ -223,6 +223,9 @@ export function createSimView(ctx) {
     const out = { ...src, name: q('name') || src.name, type: q('type'), pos: q('pos'), neg: q('neg'), dc: q('dc'), acMag: q('acMag'), acPh: q('acPh'), wave: { type: q('wtype'), p: q('wp').split(/[\s,]+/).filter(Boolean) } };
     for (const [k, t] of [['dc', out.dc], ['acMag', out.acMag], ['acPh', out.acPh], ...out.wave.p.map((x) => ['wave', x])]) if (t && !Number.isFinite(parseValue(t))) { ctx.toast(`${k}: 「${t}」を数として読めません`, true); return; }
     if (out.pos === out.neg) { ctx.toast('＋と－に同じネットは選べません', true); return; }
+    // 電圧源どうしの並列は解けない（ngspice も止まる）。ループ全体は計算の前に engine が調べる
+    const twin = out.type === 'V' && s.sources.find((x, k) => k !== i && x.type !== 'I' && ((x.pos === out.pos && x.neg === out.neg) || (x.pos === out.neg && x.neg === out.pos)));
+    if (twin) { ctx.toast(`${out.pos}–${out.neg} には電圧源 ${twin.name} があります。電圧源を同じネットに 2 つはつなげません（${twin.name} を直すか、別のネットを選んでください）`, true); return; }
     if (out.wave.type !== 'none' && out.wave.type !== 'pwl' && !out.wave.p.length) { ctx.toast('波形の値を入れてください', true); return; }
     save((sim) => { if (i == null) sim.sources.push(out); else sim.sources[i] = out; });
     render();
