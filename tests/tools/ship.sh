@@ -31,7 +31,7 @@ DEV=$(echo "$J" | jq -r '.[]|select(.name=="Android device test")|"\(.databaseId
 read -r ID CONC ATT <<<"$DEV"
 if [ "$CONC" != "success" ]; then
   echo "実機テスト: $CONC → 失敗したジョブだけ 1 回再実行 (#$ID)"
-  gh run view "$ID" --log-failed 2>/dev/null | grep -E "(NG |passed)" | sed 's/.*Z //' | head -4
+  gh run view "$ID" --log-failed 2>/dev/null | grep -E "Z NG |[0-9]+/[0-9]+ passed" | sed "s/.*Z //" | cut -c1-160 | head -4
   gh run rerun "$ID" --failed >/dev/null
   # 再実行が登録される（試行の番号が上がる）まで待ってから、終わるのを待つ
   for _ in $(seq 1 30); do
