@@ -1,0 +1,7 @@
+Starting: Intent { cmp=jp.tokan.pocketeda/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: jp.tokan.pocketeda/.MainActivity
+TotalTime: 2511
+WaitTime: 2512
+Complete
