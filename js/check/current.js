@@ -7,7 +7,7 @@
 import { copperLayers, toMm } from '../pcb/model.js';
 
 export const MIL = 0.0254;            // mm
-export const OZ_MM = 0.035;           // 1oz の銅厚（mm）
+const OZ_MIL = 1.378;                 // 1oz の銅厚（mil。0.035mm）
 export const VIA_PLATING_MM = 0.018;  // ビアの穴のめっき厚の目安（mm）
 export const DEFAULT_TEMP_RISE = 10;  // ℃
 
@@ -24,13 +24,13 @@ export function requiredWidthMm(I, { internal = false, oz = 1, tempRiseC = DEFAU
   if (!(I > 0)) return 0;
   const k = internal ? 0.024 : 0.048;
   const areaMil2 = Math.pow(I / (k * Math.pow(tempRiseC, 0.44)), 1 / 0.725);
-  return (areaMil2 / (oz * 1.378)) * MIL;
+  return (areaMil2 / (oz * OZ_MIL)) * MIL;
 }
 
 /** 線幅 w（mm）で流せる電流（A） */
 export function widthCapacityA(w, { internal = false, oz = 1, tempRiseC = DEFAULT_TEMP_RISE } = {}) {
   const k = internal ? 0.024 : 0.048;
-  const areaMil2 = (w / MIL) * oz * 1.378;
+  const areaMil2 = (w / MIL) * oz * OZ_MIL;
   return k * Math.pow(tempRiseC, 0.44) * Math.pow(areaMil2, 0.725);
 }
 

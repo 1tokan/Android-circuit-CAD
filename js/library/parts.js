@@ -14,6 +14,7 @@
 import { getSymbol, kindInfo } from '../schematic/symbols.js';
 import { getFootprint, padNumbers } from './footprints.js';
 import { generateFootprint } from './pkggen.js';
+import { newId } from '../core/project.js';
 
 export const JLC_TYPES = { basic: 'Basic', preferred: 'Preferred', extended: 'Extended', unknown: '不明' };
 
@@ -36,11 +37,10 @@ export function jlcUrl(lcsc) {
   return LCSC_RE.test(lcsc) ? `https://jlcpcb.com/partdetail/${lcsc}` : null;
 }
 
-let seq = 0;
 export function partId(p) {
   if (p.lcsc) return `lcsc:${p.lcsc}`;
   if (p.mpn) return `mpn:${(p.manufacturer || '').trim()}:${p.mpn.trim()}`;
-  return `user:${Date.now().toString(36)}${(seq++).toString(36)}`;
+  return `user:${newId('p').slice(2)}`;
 }
 
 /** 部品データの検証と整形。不正なら PartFormatError */
@@ -247,8 +247,8 @@ export function guessFootprint(kind, pkg) {
     if (pre && getFootprint(`${pre}_${size}`)) return `${pre}_${size}`;
   }
   const table = [
-    [/^SOT-?23-?5/, 'SOT-23-5'], [/^SOT-?23(-3)?$/, 'SOT-23'], [/^SOT-?223/, 'SOT-223-3_TabPin2'],
-    [/^SOD-?123/, 'D_SOD-123'], [/^SOD-?323/, 'D_SOD-323'], [/^(SMA|DO-?214AC)/, 'D_SMA'],
+    [/^SOT-?23-?5/, 'SOT-23-5'], [/^SOT-?23-?6/, 'SOT-23-6'], [/^SOT-?23(-3)?$/, 'SOT-23'], [/^SOT-?223/, 'SOT-223-3_TabPin2'],
+    [/^SOD-?123/, 'D_SOD-123'], [/^SOD-?323/, 'D_SOD-323'], [/^SOD-?523/, 'D_SOD-523'], [/^(SMA|DO-?214AC)/, 'D_SMA'],
     [/^SOIC-?8|^SOP-?8$/, 'SOIC-8'], [/^SOIC-?14|^SOP-?14$/, 'SOIC-14'], [/^SOIC-?16|^SOP-?16$/, 'SOIC-16'],
     [/^TSSOP-?8$/, 'TSSOP-8'], [/^TSSOP-?14$/, 'TSSOP-14'], [/^TSSOP-?20$/, 'TSSOP-20'],
     [/^DIP-?8$/, 'DIP-8'], [/^DIP-?14$/, 'DIP-14'], [/^DIP-?16$/, 'DIP-16'],

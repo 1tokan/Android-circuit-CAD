@@ -5,7 +5,7 @@
 //   ・ノイズ: 帰りの電流の道を短くする。電源層の分割をまたぐ配線の近くに打つと、またぐ所の帰り道ができる
 // ビアは、どの層の配線・パッド・穴・ほかのビア・基板の縁からも規則の間隔を空けた所にだけ打ち、
 // 表と裏の両方でそのネットのベタの中（塗られた所）にある点に限る（打っても孤立しない）。
-import { toMm, toNm, boardRect, allPads, padHole, pointInPad } from './model.js';
+import { toMm, toNm, boardRect, allPads, padHole, pointInPad, boardHoles } from './model.js';
 import { newId } from '../core/project.js';
 import { fillAllZones, pointInPolyWithHoles } from './zonefill.js';
 
@@ -35,7 +35,7 @@ export function addStitchVias(pcb, rules, { net = 'GND', pitchMm = 3, near = [],
   const pads = allPads(pcb);
   const holes = [];
   for (const p of pads) if (p.pad.drill || p.pad.slot) holes.push(padHole(p.inst, p.pad));
-  for (const h of pcb.holes || []) holes.push({ a: { x: toMm(h.x), y: toMm(h.y) }, b: { x: toMm(h.x), y: toMm(h.y) }, d: toMm(h.drill), npth: true });
+  for (const h of boardHoles(pcb)) holes.push({ a: { x: toMm(h.x), y: toMm(h.y) }, b: { x: toMm(h.x), y: toMm(h.y) }, d: toMm(h.drill), npth: true });
   const F = fills || fillAllZones(pcb, rules);
   const outer = pcb.zones.filter((z) => z.net === net && (z.layer === 'F.Cu' || z.layer === 'B.Cu'));
   const outerLayers = [...new Set(outer.map((z) => z.layer))];
@@ -109,14 +109,14 @@ export function planeSplitCrossings(pcb, rules, { fills = null, signalLayer = 'B
   for (const t of pcb.tracks.filter((q) => q.layer === signalLayer)) {
     const a = { x: toMm(t.a.x), y: toMm(t.a.y) }, b = { x: toMm(t.b.x), y: toMm(t.b.y) };
     const n = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / stepMm));
-    let last = null, lastAt = null, gapStart = null;
+    let last = null, gapStart = null;
     for (let s = 0; s <= n; s++) {
       const p = { x: a.x + ((b.x - a.x) * s) / n, y: a.y + ((b.y - a.y) * s) / n };
       const z = netAt(p);
       if (z == null) { if (gapStart == null) gapStart = p; continue; }
       // 切れ目を挟んで別のベタへ移った（ビアの穴の周りの抜けは同じベタに戻るので数えない）
       if (last != null && z !== last && gapStart && Math.hypot(p.x - gapStart.x, p.y - gapStart.y) < 1.5) out.push({ net: t.net, x: +((p.x + gapStart.x) / 2).toFixed(2), y: +((p.y + gapStart.y) / 2).toFixed(2), from: last, to: z });
-      last = z; lastAt = p; gapStart = null;
+      last = z; gapStart = null;
     }
   }
   return out;

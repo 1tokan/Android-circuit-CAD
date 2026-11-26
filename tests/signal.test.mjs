@@ -60,7 +60,7 @@ test('取り違えを見つける: USB の D+/D−、ヘッドホンの左右、
   assert.ok(has(runSignals(p), 'error', 'audio_lr', /チップ = 左/));
 
   p = sample();
-  comp(p, 'R11').value = '10k'; // SD_MODE = 4.5V → 左になり、左右とも左
+  comp(p, 'R10').value = '10k'; // SD_MODE = 4.5V → 左になり、左右とも左
   let r = runSignals(p);
   assert.ok(has(r, 'error', 'audio_lr', /U8 は 左/));
   assert.ok(has(r, 'warning', 'i2s_channel', /左と右がそろっていない/));

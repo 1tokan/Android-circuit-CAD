@@ -16,7 +16,7 @@ const RULE_LABELS = {
   minTrackWidthMm: '最小配線幅', minClearanceMm: '最小間隔（銅どうし）', minPadClearanceMm: '最小間隔（パッド-配線/ビア）',
   boardEdgeClearanceMm: '基板外形と銅', minViaDrillMm: 'ビア最小穴径', minViaDiameterMm: 'ビア最小外径', minViaAnnularMm: 'ビア最小ランド幅',
   minAnnularRingMm: 'スルーホールパッド最小ランド幅', minPthDrillMm: 'スルーホール最小穴径', maxDrillMm: '最大穴径',
-  minHoleToHoleMm: '穴どうし（異なるネット）', minSameNetHoleMm: '穴どうし（同じネット）', minNpthToCopperMm: '取付穴と銅', minSilkToPadMm: 'シルクとパッド',
+  minHoleToHoleMm: '穴どうし（異なるネット）', minSameNetHoleMm: '穴どうし（同じネット）', minThermalSpokes: 'サーマルのスポーク（本）', minNpthToCopperMm: '取付穴と銅', minSilkToPadMm: 'シルクとパッド',
   innerEdgeClearanceMm: '基板外形と銅（内層）', minMaskBridgeMm: 'レジストの最小ブリッジ幅',
   minSilkWidthMm: 'シルク最小線幅', minSilkTextHeightMm: 'シルク文字の最小高さ', maskExpansionMm: 'レジスト開口の広げ幅',
 };
@@ -24,6 +24,9 @@ const RULE_LABELS = {
 /**
  * @param ctx { root, getProject, getPcb, mutate(fn, reason), jump(kind, at), ask, toast, fmtTime }
  */
+/** ルール値の単位（名前が Mm で終わるものは mm、ほかは本数） */
+const ruleUnit = (k) => (/Mm$/.test(k) ? 'mm' : '');
+
 export function createCheckView(ctx) {
   const st = { tab: 'erc', filter: 'all' };
 
@@ -54,7 +57,7 @@ export function createCheckView(ctx) {
     const p = ctx.getProject();
     const n = layerCount(p);
     const base = baseRules(n), R = drcRules(p);
-    const rows = Object.keys(base).map((k) => `<label class="rule-row${R[k] !== base[k] ? ' changed' : ''}"><span>${esc(RULE_LABELS[k] || k)}</span><input type="number" step="0.001" min="0" inputmode="decimal" data-rule="${k}" value="${R[k]}"><small>mm</small></label>`).join('');
+    const rows = Object.keys(base).map((k) => `<label class="rule-row${R[k] !== base[k] ? ' changed' : ''}"><span>${esc(RULE_LABELS[k] || k)}</span><input type="number" step="${ruleUnit(k) ? '0.001' : '1'}" min="0" inputmode="decimal" data-rule="${k}" value="${R[k]}"><small>${ruleUnit(k) || '本'}</small></label>`).join('');
     const pr = ctx.ask(`DRCルール（${n}層・mm）`, `<p class="note">既定値は JLCPCB ${n >= 4 ? '4・6層' : '1・2層'}標準品の製造能力です。層数を変えると既定値も変わります。変えた値だけを保存します（色付きの行）。</p><div class="rules">${rows}</div>`,
       [{ label: 'キャンセル', value: '' }, { label: '既定に戻す', value: 'reset' }, { label: '保存', value: 'ok', cls: 'primary' }]);
     const inputs = [...document.querySelectorAll('#dialog-body [data-rule]')];
@@ -150,7 +153,7 @@ export function createCheckView(ctx) {
   function coverage(r) {
     const checked = r.checked.map((c) => `<li><span>${c.count ? `<b class="${r.issues.some((i) => i.rule === c.id && i.level === 'error') ? 'err' : 'warn'}">${c.count}件</b>` : '<span class="ok">✓</span>'}</span>${esc(c.label)}</li>`).join('');
     const un = r.unchecked.map((u) => `<li>${esc(u)}</li>`).join('');
-    const rules = st.tab === 'drc' && r.rules ? `<details><summary>使ったルール値</summary><ul class="cover">${Object.keys(r.rules).map((k) => `<li><span>${r.rules[k]}mm</span>${esc(RULE_LABELS[k] || k)}</li>`).join('')}</ul></details>` : '';
+    const rules = st.tab === 'drc' && r.rules ? `<details><summary>使ったルール値</summary><ul class="cover">${Object.keys(r.rules).map((k) => `<li><span>${r.rules[k]}${ruleUnit(k) || '本'}</span>${esc(RULE_LABELS[k] || k)}</li>`).join('')}</ul></details>` : '';
     return `<details open><summary>検査した項目（${r.checked.length}）</summary><ul class="cover">${checked}</ul></details>
       <details open><summary>検査していない項目（${r.unchecked.length}）</summary><ul class="uncovered">${un}</ul></details>${rules}`;
   }

@@ -4,8 +4,7 @@ import {
 } from './core/project.js';
 import * as store from './core/storage.js';
 import { AutoSaver } from './core/autosave.js';
-import { bus } from './core/events.js';
-import { MODULES, WORKSPACES, TOOLS, workspaceStatus } from './modules/registry.js';
+import { MODULES, WORKSPACES, TOOLS, workspaceStatus, moduleById } from './modules/registry.js';
 import { Viewport, attachGestures } from './ui/viewport.js';
 import { createPcbEditor } from './pcb/editor.js';
 import { ensurePcb, boardRect, toMm } from './pcb/model.js';
@@ -23,12 +22,11 @@ import { drcStatus } from './check/drc.js';
 import { createOutputView } from './output/view.js';
 import { createAiView } from './ai/view.js';
 import { applySpec, projectFromSpec } from './ai/spec.js';
-import { moduleById } from './modules/registry.js';
 import { esc } from './core/util.js';
 import { log as alog, logError, projectSummary, installErrorHooks, getLog, clearLog, formatLog, flushLog } from './core/applog.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '0.12.7';
+const APP_VERSION = '0.12.8';
 
 const state = {
   project: null,
@@ -64,7 +62,6 @@ async function saveNow() {
   if (!state.project) return;
   await store.saveProject(state.project);
   clearPending(state.project.id, state.project.revision);
-  bus.emit('project:saved', { id: state.project.id, revision: state.project.revision });
 }
 
 // ---- 緊急退避 ----
@@ -108,7 +105,6 @@ export function mutateProject(fn, reason = 'edit') {
   if (!['undo', 'redo'].includes(reason) && !String(reason).startsWith('check:')) alog('op', String(reason), projectSummary(state.project));
   touch(state.project);
   state.saver.markDirty();
-  bus.emit('project:changed', { reason, revision: state.project.revision });
   renderHeader();
   renderUndo();
   if (state.workspace === 'check' && state.checkView && !String(reason).startsWith('check:')) state.checkView.render();
@@ -171,7 +167,6 @@ async function openProject(project) {
   await store.setSetting('lastProjectId', project.id);
   state.saver.setEnabled(project.settings.autosave !== false);
   $('#chk-autosave').checked = project.settings.autosave !== false;
-  bus.emit('project:opened', { id: project.id });
   renderAll();
 }
 

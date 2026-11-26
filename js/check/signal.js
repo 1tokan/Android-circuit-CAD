@@ -22,7 +22,6 @@ export function parseValue(v) {
   return base * (UNIT[m[2]] ?? 1);
 }
 const fmtR = (r) => (r >= 1e6 ? `${+(r / 1e6).toFixed(2)}MΩ` : r >= 1e3 ? `${+(r / 1e3).toFixed(2)}kΩ` : `${+r.toFixed(1)}Ω`);
-const fmtC = (c) => (c >= 1e-6 ? `${+(c * 1e6).toFixed(2)}µF` : c >= 1e-9 ? `${+(c * 1e9).toFixed(2)}nF` : `${+(c * 1e12).toFixed(1)}pF`);
 const fmtF = (f) => (f >= 1e3 ? `${+(f / 1e3).toFixed(1)}kHz` : `${+f.toFixed(1)}Hz`);
 
 export const isGndNet = (n) => /^(A|D|P|S|CP)?GND(_|$)|^VSS$|^0V$/i.test(String(n || ''));

@@ -4,8 +4,13 @@
 export const FORMAT_ID = 'pocket-eda-project';
 export const SCHEMA_VERSION = 2;
 
+/** ID の作り方を差し替える（サンプルの生成など、同じ入力から同じファイルを作りたいとき）。null で元に戻す */
+let idSource = null;
+export function setIdSource(fn) { idSource = fn; }
+
 /** 衝突しにくいID（crypto.randomUUID が無い環境でも動く） */
 export function newId(prefix = 'id') {
+  if (idSource) return `${prefix}_${idSource(prefix)}`;
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return `${prefix}_${c.randomUUID()}`;
   const rnd = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);

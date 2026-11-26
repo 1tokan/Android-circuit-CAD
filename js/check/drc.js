@@ -4,11 +4,10 @@
 //
 // 既定値は JLCPCB の 1〜2 層標準品の製造能力（2026年11月確認）に合わせる。プロジェクトの board.rules で上書きできる。
 
-import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg, copperLayers, layerName, padHole } from '../pcb/model.js';
+import { allPads, toMm, boardRect, fpBox, pointInPad, distToSeg, copperLayers, padHole, fpToBoard, boardHoles } from '../pcb/model.js';
 import { computePcbConnectivity } from '../pcb/connectivity.js';
 import { padShape, trackShape, circleShape, silkSegments, silkTexts } from '../pcb/shapes.js';
 import { SILK_LINE_MM, unsupportedChars } from '../pcb/text.js';
-import { fpToBoard } from '../pcb/model.js';
 import { shapeDist, shapeSegDist, shapeBox, boxesNear, shapeCenter, nearestPoint, pointInRing, segSegDist } from '../core/geom2d.js';
 import { hash, sourceHash } from '../netlist/netlist.js';
 
@@ -37,6 +36,7 @@ export const DRC_RULES = [
   { id: 'silk_size', label: 'シルク文字の高さ・線幅、出力できない文字（ASCII以外）' },
   { id: 'mask_bridge', label: 'レジストのブリッジ幅（隣り合うパッドの開口の間に残るレジスト）' },
   { id: 'zone_fill', label: 'ベタの塗りつぶし: 別ネットの銅とのクリアランス（計算結果を独立に再検査）・取り除いた島・空のベタ' },
+  { id: 'thermal_spokes', label: 'サーマルのスポークの本数（ベタにつながる本数。KiCad の「サーマルのスポーク不足」と同じ）' },
   { id: 'netlist_sync', label: '回路図（ネットリスト）との一致・未配置の部品' },
   { id: 'footprint_unverified', label: '未照合・自動生成のフットプリント' },
   { id: 'zone_overlap', label: '同じ層で重なる別ネットのベタ' },
@@ -173,19 +173,21 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
   const drills = [];
   for (const p of pads) if (p.pad.type === 'tht') { const h = padHole(p.inst, p.pad); drills.push({ c: { x: p.x, y: p.y }, a: h.a, b: h.b, r: h.d / 2, net: p.net || `~${p.inst.id}:${p.pad.num}`, label: `${p.ref}-${p.pad.num}${h.slot ? '（長穴）' : ''}`, ref: p.ref }); }
   for (const v of pcb.vias) drills.push({ c: { x: toMm(v.x), y: toMm(v.y) }, r: toMm(v.drill) / 2, net: v.net || `~v:${v.id}`, label: `ビア（${v.net || 'ネットなし'}）` });
-  for (const h of pcb.holes) drills.push({ c: { x: toMm(h.x), y: toMm(h.y) }, r: toMm(h.drill) / 2, net: `~h:${h.id}`, label: `取付穴 φ${fmt(toMm(h.drill))}`, npth: true });
+  const holes = boardHoles(pcb);
+  for (const h of holes) drills.push({ c: { x: toMm(h.x), y: toMm(h.y) }, r: toMm(h.drill) / 2, net: `~h:${h.id}`, label: h.ref ? `${h.ref} の位置決めの穴 φ${fmt(toMm(h.drill))}` : `取付穴 φ${fmt(toMm(h.drill))}`, npth: true, ref: h.ref }); 
   for (let i = 0; i < drills.length; i++) for (let j = i + 1; j < drills.length; j++) {
     const a = drills[i], b = drills[j];
     const same = a.net === b.net;
-    if (same && a.ref && a.ref === b.ref) continue; // 同じ部品の穴（部品の設計どおり）
+    if (a.ref && a.ref === b.ref) continue; // 同じ部品の穴どうし（部品の設計どおり）
     const need = same ? R.minSameNetHoleMm : R.minHoleToHoleMm;
     if (!need) continue;
     const gap = segSegDist(a.a || a.c, a.b || a.c, b.a || b.c, b.b || b.c) - a.r - b.r;
     if (gap < need - 1e-6) add('error', 'hole_to_hole', `穴の間隔不足${same ? '（同じネット）' : ''}: ${a.label} と ${b.label}（縁どうし ${fmt(Math.max(0, gap))}mm、最小 ${need}mm）`, [a.ref, b.ref].filter(Boolean), midPt(a.c, b.c));
   }
-  for (const h of pcb.holes) {
+  for (const h of holes) {
     const hs = circleShape(h.x, h.y, h.drill);
     for (const it of items) {
+      if (h.ref && it.ref === h.ref) continue; // 部品の位置決めの穴と、その部品のパッド（部品の設計どおり）
       const gap = shapeDist(hs, it.shape);
       if (gap < R.minNpthToCopperMm - 1e-6) add('error', 'npth_clearance', `取付穴と ${it.label} の間隔 ${fmt(Math.max(0, gap))}mm（最小 ${R.minNpthToCopperMm}mm）`, it.ref ? [it.ref] : [], { x: toMm(h.x), y: toMm(h.y) });
     }
@@ -223,7 +225,13 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     const fully = b.x1 < br.x0 || b.x0 > br.x1 || b.y1 < br.y0 || b.y0 > br.y1;
     const contained = b.x0 >= br.x0 - 1e-6 && b.x1 <= br.x1 + 1e-6 && b.y0 >= br.y0 - 1e-6 && b.y1 <= br.y1 + 1e-6;
     if (fully) add('error', 'outside_board', `${f.ref} が基板の外に置かれています（未配置）`, [f.ref], at);
-    else if (!contained) add('warning', 'outside_board', `${f.ref} の外形枠が基板の端からはみ出しています（基板端のコネクタ以外は内側へ）`, [f.ref], at);
+    else if (!contained) {
+      // 基板の端に差し込み口を出すコネクタ（パッドはすべて基板の中）はふつうの置き方なので「お知らせ」
+      const padsIn = allPads(pcb).filter((p) => p.inst === f).every((p) => p.x >= br.x0 && p.x <= br.x1 && p.y >= br.y0 && p.y <= br.y1);
+      const edgeConnector = /^(J|P|CN|USB)\d/i.test(f.ref) && padsIn;
+      if (edgeConnector) add('info', 'outside_board', `${f.ref} は基板の端からはみ出すコネクタです（パッドは基板の中）。差し込み口の向きを確認してください`, [f.ref], at);
+      else add('warning', 'outside_board', `${f.ref} の外形枠が基板の端からはみ出しています`, [f.ref], at);
+    }
   }
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
     const A = boxes[i], B = boxes[j];
@@ -318,7 +326,12 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     if (!z.net) add('warning', 'zone_fill', `${z.layer} のベタにネットが設定されていません（どこにもつながりません）`, [], null);
     if (!f) continue;
     if (!f.polygons.length) add('warning', 'zone_fill', `${z.layer} のベタ（${z.net || 'ネットなし'}）は塗れる場所がありません`, [], null);
-    if (f.islandsRemoved) add('warning', 'zone_fill', `${z.layer} のベタ（${z.net}）: どこにもつながらない島を ${f.islandsRemoved} か所取り除きました`, [], null);
+    // 島の除去は塗りつぶしのふつうの動作（どこにもつながらない銅を残さない）なので「お知らせ」
+    if (f.islandsRemoved) add('info', 'zone_fill', `${z.layer} のベタ（${z.net}）: どこにもつながらない島を ${f.islandsRemoved} か所取り除きました`, [], null);
+    // スポークが 0 本のパッドはベタとはつながらず配線でつなぐもの（KiCad と同じく数えない）
+    const starved = (f.spokeCount || []).filter((s) => s.spokes > 0 && s.spokes < R.minThermalSpokes);
+    for (const s of starved.slice(0, 20)) add('warning', 'thermal_spokes', `${s.ref}.${s.pad}: ${z.layer} のベタ（${z.net}）とつながるスポークが ${s.spokes} 本（${R.minThermalSpokes} 本以上）。配線やビアがスポークの場所をふさいでいます`, [s.ref], { x: s.x, y: s.y });
+    if (starved.length > 20) add('warning', 'thermal_spokes', `${z.layer} のベタ（${z.net}）: ほかに ${starved.length - 20} か所`, [], null);
     const need = Math.min(zc, R.minClearanceMm) - 0.002; // 円の近似誤差を見込む
     const others = items.filter((it) => it.layers.includes(z.layer) && it.net !== z.net);
     let found = 0;
@@ -362,7 +375,7 @@ export function runDrc(project, pcb, { now = new Date().toISOString(), limit = 3
     issues,
     checked: DRC_RULES.map((r) => ({ ...r, count: issues.filter((i) => i.rule === r.id).length })),
     unchecked: DRC_UNCHECKED,
-    summary: { errors: issues.filter((i) => i.level === 'error').length, warnings: issues.filter((i) => i.level === 'warning').length, unrouted: conn.unrouted, dangling, items: items.length },
+    summary: { errors: issues.filter((i) => i.level === 'error').length, warnings: issues.filter((i) => i.level === 'warning').length, infos: issues.filter((i) => i.level === 'info').length, unrouted: conn.unrouted, dangling, items: items.length },
   };
 }
 

@@ -1,31 +1,9 @@
 // 第5段階: ERC/DRC の実ブラウザE2Eテスト（スマホ）
 // 使い方: python3 -m http.server 8765 を起動した状態で node tests/e2e-check.mjs
-import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
-import fs from 'node:fs';
+import { openApp, OUT } from './e2e-lib.mjs';
 import assert from 'node:assert/strict';
 
-const URL_ = process.env.URL || 'http://localhost:8765/';
-const OUT = process.env.OUT || 'tests/out';
-fs.mkdirSync(OUT, { recursive: true });
-const results = [];
-async function step(name, fn) {
-  try { await fn(); results.push(['OK', name]); console.log('OK  ', name); }
-  catch (e) { results.push(['NG', name, e.message]); console.log('NG  ', name, '\n     ', e.message.split('\n').slice(0, 6).join('\n      ')); }
-}
-const browser = await chromium.launch({
-  executablePath: '/usr/bin/google-chrome', headless: true,
-  env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
-  args: ['--no-sandbox', '--no-proxy-server', '--disable-background-networking'],
-});
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-const page = await ctx.newPage();
-page.setDefaultTimeout(6000);
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(URL_);
-await page.waitForSelector('html[data-ready="1"]');
-const ws = (id) => page.locator(`#ws-nav button[data-ws="${id}"]`).click();
+const { page, errors, step, ws, finish } = await openApp({ timeout: 6000 });
 const tool = (id) => page.locator(`#toolbar .tool[data-tool="${id}"]`).click();
 const checks = () => page.evaluate(() => window.pocketEDA.state.project.checks);
 
@@ -191,7 +169,7 @@ await step('ログ: DRC の結果と操作が記録され、画面で見られ�
   await page.locator('#btn-menu').click();
   await page.locator('#menu [data-act="log"]').click();
   const t = await page.locator('#dialog .log-view').textContent();
-  assert.match(t, /起動 0\.12\.7/);
+  assert.match(t, /起動 0\.12\.8/);
   assert.match(t, /DRC: エラー/);
   assert.match(t, /エラーの種類: /);
   await page.screenshot({ path: `${OUT}/check-log.png` });
@@ -199,7 +177,4 @@ await step('ログ: DRC の結果と操作が記録され、画面で見られ�
 });
 
 await step('コンソールエラーなし', async () => { assert.deepEqual(errors, []); });
-await browser.close();
-const ng = results.filter((r) => r[0] === 'NG');
-console.log(`\n${results.length - ng.length}/${results.length} passed`);
-process.exit(ng.length ? 1 : 0);
+await finish();

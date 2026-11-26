@@ -15,6 +15,7 @@ def main():
     # 5) DRC（先に。ほかの照合でライブラリから読んだ部品を扱ったあとだと pcbnew が落ちることがある）
     pcbnew.ZONE_FILLER(b).Fill(b.Zones()); b.BuildConnectivity()
     pcbnew.WriteDRCReport(b, report, pcbnew.EDA_UNITS_MILLIMETRES, True)
+    if not os.path.exists(report): bad('DRC did not run (.kicad_dru の書き方など。KiCad の出力の Init DRC engine を見る)')
     mm = pcbnew.ToMM
     problems = 0
     def bad(*a):

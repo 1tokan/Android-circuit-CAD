@@ -4,6 +4,18 @@ Androidで動く電子回路・PCB設計CAD（PWA）。最終目標は、LCSCの
 
 **現在: 第12段階（信号経路の審査）**。設計から JLCPCB への基板製造・部品実装の注文データまで作れます。Android の実機での操作性の確認は docs/DEVICE_TEST.md の手順で行ってください。
 
+### 見直し・整理（0.12.8）
+- **食い違いの解消**
+  - 2 ピンの部品の極性の印が PCB で消えていた（ネットリストの取込で極性を落としていた）→ 直した
+  - USB-C・ジャックの位置決めの穴を基板の取付穴として別に置いていたため、部品を動かすと穴が残った → **穴はフットプリントの一部**にし、部品と一緒に動く（Gerber・Excellon・DRC・ベタ・自動配線・KiCad 書き出しで同じ穴を使う）。古いプロジェクトの重なる穴は開いたときに消す
+  - KiCad 用の設計ルール（.kicad_dru）に書式の誤りがあり、KiCad の DRC が止まっていた → 直し、検証スクリプトで DRC の結果が無ければ失敗にした
+- **DRC**: サーマルのスポークが 2 本未満のパッドを警告（KiCad の「starved thermal」と同じ観点）。基板の端に出すコネクタのはみ出し・小さいベタの島の除去は「情報」に変更
+- **内蔵フットプリントはすべて KiCad 公式から変換**（55 種。手作りは半固定抵抗 1 種のみ）。寸法の自前の生成関数をやめ、KiCad の読み取り処理も 1 つにまとめた
+- **サンプルの作り方を同梱**: `node samples/build/usb-dac-amp.mjs` で回路仕様から全配線・検査まで作り直せる。ID・日時を固定したので毎回同じファイルになり、`tests/sample-build.test.mjs` で同梱のファイルと一致することを確かめる
+  - 抵抗の番号を詰めた（使わなくなった R8 を外した）: 旧 R9→R8、R10→R9、R11→R10、R15→R11、R16→R12、R17→R13、R18→R14、R19→R15
+  - 結果: 200 ネット全配線、DRC エラー 0・未配線 0・警告 20（サーマルのスポーク不足 18・レジストの橋 2）、ERC エラー 0。KiCad 7.0.11 でも読み込み・照合の食い違い 0
+- 使われていないコード（イベントバス・関数・定数）を削除。E2E テストの共通部分を `tests/e2e-lib.mjs` にまとめた
+
 ### GND のベタ・つなぎビア・電源の見直し（0.12.1）
 - PCB の選択ツールに「GND のつなぎビア」: 表裏の GND のベタを内層とつなぐビアを打つ。外層の配線が内層の電源の分割をまたぐ所の近くを先に（帰り道を作る）、残りは 3mm 格子。どの層の配線・パッド・穴・取付穴・縁からも規則の間隔を空けた所だけ
 - サンプル: **表（F.Cu）に GND のベタ**を追加（表の銅 22% → 74%、裏・内層と釣り合う）。つなぎビア 119 本（LDO の GND の近く・分割をまたぐ 13 か所の近く・3mm 格子）。配線は変えず、DRC エラー 0
@@ -86,10 +98,11 @@ Androidで動く電子回路・PCB設計CAD（PWA）。最終目標は、LCSCの
 ### サンプルを開く（プロジェクト一覧の「サンプル」）
 - 設計例「**USB DAC アンプ**」を同梱。開くたびに新しいプロジェクトとして追加するので、いじって試せます（元のサンプルは変わりません）
   - USB-C（バスパワー 5V）→ ESP32-S3FN8（USB オーディオ）→ I2S 32bit → PCM5102A（DAC）＋ TPA6132A2（ヘッドホン）／MAX98357A ×2（8Ω スピーカー L/R）
-  - 60×20mm・4層（In1 = GND、In2 = 5V／3.3V／アナログ 3.3V に分割）。USB-C は左端、**スピーカー端子 L/R（JST PH 横向き）は右端**、**3.5mm ジャックは上の長辺から差し込む向き**（基板の長さを取らない）
-  - 回路図 ERC エラー 0、PCB は**全ネット配線済みで DRC エラー 0**（警告: 端のコネクタのはみ出し・シルクの重なりなど）。主要部品は LCSC 品番つき
+  - 60×26mm・4層（In1 = GND、In2 = 5V／3.3V／アナログ 3.3V に分割）・部品は表だけ（書き込み用のテストパッドのみ裏）。USB-C は左端、**スピーカー端子 L/R（JST PH 横向き）は右端**、**3.5mm ジャックは上の長辺から差し込む向き**（基板の長さを取らない）
+  - 回路図 ERC エラー 0、PCB は**全ネット配線済みで DRC エラー 0**（警告: サーマルのスポーク不足・レジストの橋。0.12.8 時点）。実装する部品はすべて LCSC 品番つき
+  - 作り方: `samples/build/usb-dac-amp.mjs`（回路仕様 → 回路図 → ネットリスト → PCB → 自動配線 → ベタ → 検査。アプリと同じ処理）
   - 未確定のもの（第11段階で品番は解消）: ESP32-S3 のファームウェア（USB オーディオ UAC2。Full Speed のため 32bit は 96kHz まで）、ダンピングファクター（出力インピーダンス）の実測
-- テスト: `tests/sample.test.mjs`（ERC・DRC・配置の要件・Gerber）、`tests/e2e-sample.mjs`（画面から開いて検査・出力・3D）
+- テスト: `tests/sample.test.mjs`（ERC・DRC・配置の要件・Gerber）、`tests/sample-build.test.mjs`（作り直すと同梱のファイルと同じ）、`tests/e2e-sample.mjs`（画面から開いて検査・出力・3D）
 
 ### 自動配線（PCB の「自動配線」）
 - 未配線の接続を、設計ルールの間隔を守って格子上の経路探索（A*）で引きます。引けないときは、この実行で引いた配線をはがして引き直します。今ある配線・ビアは動かしません
@@ -306,7 +319,7 @@ npm run e2e                            # 実ブラウザテスト（保存・回
 
 `tests/e2e-ai3d.mjs` は Anthropic API への送信を差し替えて試験します（実際の API には送りません）。
 
-E2EはPlaywrightを使います（`npm i -D playwright`。スクリプト冒頭の import パスと `executablePath` は環境に合わせて変更してください）。
+E2EはPlaywrightを使います（`npm i -D playwright`。ブラウザの起動は `tests/e2e-lib.mjs` にまとめてあるので、import パスと `executablePath` はそこを環境に合わせて変更してください）。
 
 ## 構成
 
@@ -317,7 +330,6 @@ js/app.js                 起動・UIシェル。プロジェクト変更は mut
 js/core/project.js        データモデル（純粋関数）: 作成・検証・補完・移行・シリアライズ
 js/core/storage.js        IndexedDB（projects / backups / kv）
 js/core/autosave.js       自動保存
-js/core/events.js         モジュール間イベントバス
 js/modules/registry.js    10モジュールの登録簿と実装状態（planned / partial / ready）
 js/core/history.js        元に戻す・やり直す（スナップショット）
 js/ui/viewport.js         パン・ズーム・ジェスチャー判定（タップ/ドラッグ/長押し/ピンチの振り分け）
@@ -327,7 +339,8 @@ js/schematic/model.js     配置・配線・移動・回転・ミラー・削除
 js/schematic/connectivity.js  電気的接続の計算（ネット・接続ドット・未接続ピン）
 js/schematic/render.js    SVG描画
 js/schematic/editor.js    操作・ツール・部品一覧・属性編集
-js/library/footprints.js  フットプリント定義（シンボルとは独立、mm単位）
+js/library/footprints.js  内蔵フットプリント（fp-kicad.js の KiCad 公式寸法から作る、mm単位）
+js/library/fp-kicad.js    KiCad 公式フットプリントの寸法（tests/tools/kicad-import.mjs で生成）
 js/library/pkggen.js      パッケージ名からのフットプリント自動生成（推定）
 js/library/parts.js       部品データのスキーマ・検証・検索・ピン↔パッド対応・内蔵部品
 js/library/importer.js    CSV/JSON の取込・書出（列名の表記ゆれ吸収）
@@ -341,12 +354,14 @@ js/pcb/render.js          PCBのSVG描画
 js/pcb/editor.js          PCBの操作・ツール・属性編集
 js/pcb/zonefill.js        ベタの塗りつぶし
 js/check/                 ERC・DRC・設計ルール（rules.js）
-js/output/                製造データ（plot.js → Gerber/Excellon/ZIP）・製造仕様（fabspec.js）・BOM/CPL
+js/output/                製造データ（plot.js → Gerber/Excellon/ZIP）・製造仕様（fabspec.js）・BOM/CPL・KiCad（kicad.js 基板、kicad-sch.js 回路図、sexpr.js 共通）
 js/ai/                    Claude での回路設計（spec.js 回路仕様の形式と作図、claude.js API、prompt.js 指示文、view.js 画面）
 js/view3d/viewer.js       3D 表示（three.js）
 js/core/util.js, geom2d.js  共通の小関数・2D 幾何
 js/vendor/                同梱ライブラリ（polygon-clipping・Hershey フォント・three.js。LICENSES.md）
 docs/ROADMAP.md           技術選定と開発ロードマップ
+samples/                  同梱サンプル（usb-dac-amp.json）と作り方（build/）
+tests/e2e-lib.mjs         E2E の共通部分（ブラウザ起動・手順の記録）
 ```
 
 ## データ保存についての注意

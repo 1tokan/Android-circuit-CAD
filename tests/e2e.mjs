@@ -1,30 +1,12 @@
 // 実ブラウザ(Chrome)での第1段階E2Eテスト
 // 使い方: python3 -m http.server 8765 を起動した状態で node tests/e2e.mjs
-import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+import { openApp, URL_, OUT, PIXEL_UA } from './e2e-lib.mjs';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
-const URL_ = process.env.URL || 'http://localhost:8765/';
-const OUT = process.env.OUT || 'tests/out';
-fs.mkdirSync(OUT, { recursive: true });
 
-const results = [];
-async function step(name, fn) {
-  try { await fn(); results.push(['OK', name]); console.log('OK  ', name); }
-  catch (e) { results.push(['NG', name, e.message]); console.log('NG  ', name, '\n     ', e.message); }
-}
 
-const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true, env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, args: ['--no-sandbox', '--no-proxy-server', '--disable-background-networking'] });
-const ctx = await browser.newContext({
-  viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
-  userAgent: 'Mozilla/5.0 (Linux; Android 15; Pixel 9a) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0 Mobile Safari/537.36',
-  acceptDownloads: true,
-});
-const page = await ctx.newPage();
-page.setDefaultTimeout(6000);
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+const { browser, ctx, page, errors, step, finish } = await openApp({ timeout: 6000, context: { acceptDownloads: true, userAgent: PIXEL_UA }, open: false });
 
 const ready = () => page.waitForSelector('html[data-ready="1"]', { timeout: 10000 });
 const saveState = () => page.locator('#save-state').getAttribute('data-state');
@@ -261,7 +243,4 @@ await step('コンソールエラーなし', async () => {
   assert.deepEqual(errors, []);
 });
 
-await browser.close();
-const ng = results.filter((r) => r[0] === 'NG');
-console.log(`\n${results.length - ng.length}/${results.length} passed`);
-process.exit(ng.length ? 1 : 0);
+await finish();

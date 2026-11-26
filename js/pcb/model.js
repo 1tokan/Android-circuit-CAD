@@ -28,9 +28,9 @@ export function mirrorLayer(layer, pcb) {
 /** 既定値で補った PCB データ（旧形式・空データにも対応） */
 export function ensurePcb(project) {
   const p = project.pcb || {};
-  if (p.version === 2 && p.settings && p.outline && !Array.isArray(p.outline)) return p; // 既に新形式（同じオブジェクトを返す）
+  if (p.version === 3 && p.settings && p.outline && !Array.isArray(p.outline)) return p; // 既に新形式（同じオブジェクトを返す）
   const out = {
-    version: 2,
+    version: 3, // 3: 部品の位置決めの穴はフットプリントが持つ（0.12.8）
     outline: p.outline && !Array.isArray(p.outline) ? p.outline : { type: 'rect', x: 0, y: 0, w: toNm(50), h: toNm(40) },
     footprints: Array.isArray(p.footprints) ? p.footprints : [],
     tracks: Array.isArray(p.tracks) ? p.tracks : [],
@@ -50,6 +50,8 @@ export function ensurePcb(project) {
     netlistHash: p.netlistHash || null,
   };
   project.pcb = out;
+  // 0.12.8 より前: 部品の位置決めの穴を基板の取付穴として別に置いていた → 部品の穴と重なるものは消す（部品と一緒に動く穴になる）
+  dropFootprintHoleCopies(out);
   return out;
 }
 
@@ -156,10 +158,12 @@ export function importNetlist(pcb, nl, resolveFp) {
   for (const c of nl.components) {
     const def = resolveFp(c);
     if (!def) { report.noFootprint.push(c.ref); continue; }
-    const snap = JSON.parse(JSON.stringify({ id: def.id, name: def.name, package: def.package || '', pads: def.pads, body: def.body, courtyard: def.courtyard, generated: !!def.generated, verified: !!def.verified }));
+    // 部品に写す形: パッド・本体・外形枠・位置決めの穴（npth）・極性（シルクの 1 番の印）
+    const snap = JSON.parse(JSON.stringify({ id: def.id, name: def.name, package: def.package || '', pads: def.pads, body: def.body, courtyard: def.courtyard, ...(def.npth?.length ? { npth: def.npth } : {}), ...(def.polarity ? { polarity: true } : {}), generated: !!def.generated, verified: !!def.verified }));
     let inst = (c.compId && byComp.get(c.compId)) || byRef.get(c.ref);
     if (inst) {
-      if (inst.fpDef.id !== snap.id || JSON.stringify(inst.fpDef.pads) !== JSON.stringify(snap.pads) || JSON.stringify(inst.fpDef.body) !== JSON.stringify(snap.body)) { inst.fpDef = snap; report.fpChanged.push(c.ref); }
+      const shape = (d) => JSON.stringify([d.id, d.pads, d.body, d.npth || null]);
+      if (shape(inst.fpDef) !== shape(snap)) { inst.fpDef = snap; report.fpChanged.push(c.ref); } else if (!!inst.fpDef.polarity !== !!snap.polarity) inst.fpDef = snap;
       inst.ref = c.ref; inst.value = c.value; inst.compId = c.compId || inst.compId;
       inst.padNets = padNetsOf.get(c.ref) || {};
       inst.lcsc = c.lcsc; inst.dnp = !!c.dnp;
@@ -237,6 +241,27 @@ export function addText(pcb, x, y, text, layer = 'F.SilkS', sizeMm = 1) {
   const t = { id: newId('x'), layer, text: String(text), x: toNm(x), y: toNm(y), size: toNm(sizeMm), rot: 0 };
   pcb.texts.push(t);
   return t;
+}
+
+/** 部品の位置決めの穴と同じ位置・同じ径の取付穴（古い形式の写し）を消す */
+export function dropFootprintHoleCopies(pcb) {
+  const own = boardHoles({ ...pcb, holes: [] });
+  const before = pcb.holes.length;
+  pcb.holes = pcb.holes.filter((h) => !own.some((o) => Math.abs(o.x - h.x) < 20000 && Math.abs(o.y - h.y) < 20000 && Math.abs(o.drill - h.drill) < 20000));
+  return before - pcb.holes.length;
+}
+
+/**
+ * 基板の非メッキ穴の全部（nm）: 基板に置いた取付穴 ＋ 部品の位置決めの穴（フットプリントの npth。部品と一緒に動く）
+ * @returns [{ id, x, y, drill, ref? }]（部品の穴は ref を持ち、id は 'f:<部品id>:<番号>'）
+ */
+export function boardHoles(pcb) {
+  const out = [...pcb.holes];
+  for (const f of pcb.footprints) (f.fpDef.npth || []).forEach((h, i) => {
+    const c = fpToBoard(f, h.x, h.y);
+    out.push({ id: `f:${f.id}:${i}`, x: toNm(c.x), y: toNm(c.y), drill: toNm(h.d), ref: f.ref });
+  });
+  return out;
 }
 
 export function addHole(pcb, x, y, drillMm = 3.2) {

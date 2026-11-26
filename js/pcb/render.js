@@ -1,8 +1,6 @@
 // PCB の SVG 描画（単位 mm）
-import { toMm, boardRect, copperLayers, padHoleLocal, holeSvg } from './model.js';
-import { cornerRadius } from './shapes.js';
-import { silkSegments, pin1Mark, silkTexts } from './shapes.js';
-import { esc } from '../core/util.js';
+import { toMm, boardRect, copperLayers, padHoleLocal, holeSvg, boardHoles } from './model.js';
+import { cornerRadius, silkSegments, pin1Mark, silkTexts } from './shapes.js';
 
 const mm = (q) => ({ x: toMm(q.x), y: toMm(q.y) });
 
@@ -70,7 +68,7 @@ export function renderPcb(pcb, { selection = new Set(), conn = null, activeLayer
   out.push('<g class="pads">' + fps.map((f) => footprintLayer(f, 'Cu', selection.has(`f:${f.id}`))).join('') + '</g>');
   // ビア・穴
   out.push('<g class="vias">' + pcb.vias.map((v) => `<circle class="via${selection.has(`v:${v.id}`) ? ' sel' : ''}" cx="${toMm(v.x)}" cy="${toMm(v.y)}" r="${toMm(v.diameter) / 2}"/><circle class="drill" cx="${toMm(v.x)}" cy="${toMm(v.y)}" r="${toMm(v.drill) / 2}"/>`).join('') + '</g>');
-  out.push('<g class="holes">' + pcb.holes.map((h) => `<circle class="hole${selection.has(`h:${h.id}`) ? ' sel' : ''}" cx="${toMm(h.x)}" cy="${toMm(h.y)}" r="${toMm(h.drill) / 2}"/>`).join('') + '</g>');
+  out.push('<g class="holes">' + boardHoles(pcb).map((h) => `<circle class="hole${selection.has(`h:${h.id}`) ? ' sel' : ''}" cx="${toMm(h.x)}" cy="${toMm(h.y)}" r="${toMm(h.drill) / 2}"/>`).join('') + '</g>');
   // シルク
   if (S.silk) {
     out.push('<g class="silk-layer">' + fps.map((f) => footprintLayer(f, 'Silk', selection.has(`f:${f.id}`))).join(''));

@@ -42,7 +42,7 @@
 |---|---|---|---|---|
 | **tracespace**（@tracespace/parser, plotter, renderer / gerber-to-svg） | MIT | 純JS、ブラウザで動作 | Gerber/Excellon の**独立検証・プレビュー** | **採用**（第6段階）。生成側と別実装なので「独立したGerberビューアでの検証」を満たす。v5系は pre-release のため v4 安定版も比較 |
 | KiCad 本体 | GPL-3.0 | C++/デスクトップ | — | 不採用（組込み不可）。ただし**生成Gerberのクロスチェック**にPCで使う |
-| KiCad 公式ライブラリ（シンボル/フットプリント） | CC-BY-SA 4.0（生成物への例外条項あり） | データのみ | フットプリント寸法の参照 | 変換して取り込む場合は表示義務を守る。初期部品は IPC-7351 準拠で自作 |
+| KiCad 公式ライブラリ（シンボル/フットプリント） | CC-BY-SA 4.0（生成物への例外条項あり） | データのみ | フットプリント寸法の参照 | 内蔵フットプリントは KiCad 公式から変換（tests/tools/kicad-import.mjs。出典・ライセンスは js/vendor/LICENSES.md） |
 | tscircuit 系（circuit-json, gerber生成等） | MIT | TS/JS | 参考実装 | 依存はせず、データ構造・Gerber出力の比較対象にする |
 | CDFER/jlcpcb-parts-database | MIT | CSV | 部品DB | **採用**（インポート元） |
 | EasyEDA / LCEDA の部品データ | 利用規約依存 | — | — | 直接取り込みはしない |

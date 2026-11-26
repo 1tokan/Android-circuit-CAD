@@ -38,7 +38,6 @@ const SUPPLY_PIN_RE = /^(VCC|VDD|AVDD|DVDD|VDDA|VDDIO|VIN|V\+|VBAT|VBUS|3V3|5V|\
 const GND_PIN_RE = /^(GND|AGND|DGND|PGND|VSS|VSSA|EP|PAD|V-)$/i;
 const isGndName = (n) => GND_RE.test(String(n).trim());
 
-const DRIVER_TYPES = new Set(['output', 'bidirectional', 'passive', 'power_out', 'open_collector']);
 
 /**
  * @returns {{ ranAt, sourceHash, issues, checked, unchecked, summary }}

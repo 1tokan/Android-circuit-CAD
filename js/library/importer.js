@@ -3,7 +3,7 @@
 // JLCPCB部品ライブラリのCSV、CDFER/jlcpcb-parts-database のCSV、
 // ユーザーが作ったCSV/JSON を取り込む。列名は表記ゆれを吸収して対応づける。
 
-import { normalizePart, normalizeLcsc, guessKind, guessFootprint, normalizeValue, pinCountFromPackage, icPinCount, PartFormatError } from './parts.js';
+import { normalizePart, normalizeLcsc, guessKind, guessFootprint, normalizeValue, icPinCount, PartFormatError } from './parts.js';
 import { getFootprint } from './footprints.js';
 
 export const LIBRARY_FORMAT = 'pocket-eda-library';

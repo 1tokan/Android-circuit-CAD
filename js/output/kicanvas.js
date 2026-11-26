@@ -55,7 +55,7 @@ export function kicanvasPage(pcbText, fileName, { scriptUrl = KICANVAS_URL, time
 
 /** KiCanvas が読んだ数と、書き出した設計の数を比べる */
 export function compareCounts(msg, pcb) {
-  const want = { footprints: pcb.footprints.length + pcb.holes.length, pads: pcb.footprints.reduce((s, f) => s + f.fpDef.pads.length, 0) + pcb.holes.length, segments: pcb.tracks.length, vias: pcb.vias.length, zones: pcb.zones.length };
+  const want = { footprints: pcb.footprints.length + pcb.holes.length, pads: pcb.footprints.reduce((s, f) => s + f.fpDef.pads.length + (f.fpDef.npth || []).length, 0) + pcb.holes.length, segments: pcb.tracks.length, vias: pcb.vias.length, zones: pcb.zones.length };
   const label = { footprints: '部品（取付穴を含む）', pads: 'パッド', segments: '配線', vias: 'ビア', zones: 'ベタ' };
   const rows = Object.keys(want).map((k) => ({ key: k, label: label[k], want: want[k], got: msg[k], ok: msg[k] === want[k] }));
   return { ok: rows.every((r) => r.ok), rows };

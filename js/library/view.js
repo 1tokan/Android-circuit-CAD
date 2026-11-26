@@ -1,6 +1,6 @@
 // 「部品」作業領域の画面: 検索・詳細・取込・手動登録・編集・削除
 import { KINDS, kindInfo } from '../schematic/symbols.js';
-import { listFootprints, getFootprint, padNumbers } from './footprints.js';
+import { listFootprints, getFootprint } from './footprints.js';
 import {
   JLC_TYPES, normalizePart, partSymbol, effectivePinMap, checkPinMap, lcscUrl, jlcUrl, unitPrice, displayValue,
   partFootprint, guessFootprint,

@@ -290,7 +290,7 @@ export function generateFootprint(kind, pkg) {
     id, name: String(pkg).trim(), desc: `${desc}（パッケージ名から自動生成）`, package: String(pkg).trim(),
     pads: g.pads, body: g.body,
     courtyard: { x0: r4(Math.min(...xs) - 0.25), y0: r4(Math.min(...ys) - 0.25), x1: r4(Math.max(...xs) + 0.25), y1: r4(Math.max(...ys) + 0.25) },
-    pin1: true, verified: false, generated: true,
+    verified: false, generated: true,
     source: '標準寸法からの推定（データシートで要確認）',
   });
 }

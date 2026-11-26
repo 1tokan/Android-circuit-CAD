@@ -1,30 +1,9 @@
 // 同梱サンプルをアプリの画面から開いて、回路図・PCB・検査・出力・3D が動くかの実ブラウザE2E（スマホ）
 // 使い方: python3 -m http.server 8765 を起動した状態で node tests/e2e-sample.mjs
-import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
-import fs from 'node:fs';
+import { openApp, OUT } from './e2e-lib.mjs';
 import assert from 'node:assert/strict';
 
-const URL_ = process.env.URL || 'http://localhost:8765/';
-const OUT = process.env.OUT || 'tests/out';
-fs.mkdirSync(OUT, { recursive: true });
-const results = [];
-async function step(name, fn) {
-  try { await fn(); results.push(['OK', name]); console.log('OK  ', name); }
-  catch (e) { results.push(['NG', name, e.message]); console.log('NG  ', name, '\n     ', e.message.split('\n').slice(0, 6).join('\n      ')); }
-}
-const browser = await chromium.launch({
-  executablePath: '/usr/bin/google-chrome', headless: true,
-  args: ['--no-sandbox', '--no-proxy-server', '--disable-background-networking', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-});
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-const page = await ctx.newPage();
-page.setDefaultTimeout(20000);
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(URL_);
-await page.waitForSelector('html[data-ready="1"]');
-const ws = (id) => page.locator(`#ws-nav button[data-ws="${id}"]`).click();
+const { page, errors, step, ws, finish } = await openApp({ timeout: 20000, gpu: true });
 
 await step('プロジェクト一覧の「サンプル」から USB DAC アンプを開ける', async () => {
   await page.click('#btn-projects');
@@ -156,7 +135,4 @@ await step('コンソールエラーなし', async () => {
   assert.deepEqual(errors.filter((e) => !/WebGL|GPU stall|GL_|swiftshader/i.test(e)), []);
 });
 
-await browser.close();
-const ng = results.filter((r) => r[0] === 'NG');
-console.log(`\n${results.length - ng.length}/${results.length} OK`);
-process.exit(ng.length ? 1 : 0);
+await finish();

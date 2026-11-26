@@ -6,6 +6,7 @@
 // パッドの (at x y 角度) の角度は KiCad では部品の向きを含んだ絶対角度。
 // ベタはアウトラインだけを書く（塗りの形は KiCad で「すべてのゾーンを塗りつぶす（B キー）」で作り直す）。
 
+import { numFmt, q, uuidFrom } from './sexpr.js';
 import { toMm, copperLayers, boardToFp, padLayers } from '../pcb/model.js';
 import { silkSegments, refdesPos, pin1Mark } from '../pcb/shapes.js';
 
@@ -22,22 +23,11 @@ export const FP_LIB = 'PocketEDA';
 export const safeName = (s) => String(s || 'Footprint').replace(/[^A-Za-z0-9_+.,\-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'Footprint';
 
 /** 数値（mm。小数6桁まで・末尾の0は省く） */
-const n = (v) => { const r = Math.round(v * 1e6) / 1e6; return Object.is(r, -0) || r === 0 ? '0' : String(r); };
+const n = numFmt(6);
 /** 文字列（S式の引用符） */
-const q = (s) => `"${String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
 /** 角度（0〜360 未満） */
 const ang = (a) => { const r = ((Math.round(a * 1e6) / 1e6) % 360 + 360) % 360; return r === 0 ? '' : ` ${n(r)}`; };
 
-/** 決まった UUID（同じ設計からは同じファイルになる。KiCad は tstamp を区別にだけ使う） */
-function uuidFrom(str) {
-  // FNV-1a を 4 回（種を変えて）→ 128bit
-  const h = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b].map((seed) => {
-    let x = seed >>> 0;
-    for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 0x01000193) >>> 0; }
-    return x.toString(16).padStart(8, '0');
-  }).join('');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${'89ab'[parseInt(h[16], 16) & 3]}${h.slice(17, 20)}-${h.slice(20, 32)}`;
-}
 
 /** KiCad の層の一覧（銅箔は 0=F.Cu、1..=内層、31=B.Cu） */
 function layerTable(nCu) {
@@ -173,6 +163,11 @@ function footprintSexpr(inst, nets, cu, ctx = {}, libMode = false) {
     if (net) s += ` ${net}`;
     s += ` (tstamp ${id(`pad${k}`)}))`;
     out.push(s);
+  });
+  // 位置決めの穴（非メッキ。KiCad 公式のフットプリントと同じく部品の中の穴）
+  (def.npth || []).forEach((h, k) => {
+    const p = localK(inst, h.x, h.y);
+    out.push(`    (pad "" np_thru_hole circle (at ${n(p.x)} ${n(p.y)}${ang(a)}) (size ${n(h.d)} ${n(h.d)}) (drill ${n(h.d)}) (layers "*.Cu" "*.Mask") (tstamp ${id(`npth${k}`)}))`);
   });
   const model = ctx.model?.(name);
   if (model) out.push(`    (model ${q(model)} (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`);
@@ -354,6 +349,9 @@ export function kicadDru(project) {
     '# 内層の銅と基板外形',
     `(rule "PocketEDA 内層と外形" (layer inner) (constraint edge_clearance (min ${mm(Math.max(R.boardEdgeClearanceMm, R.innerEdgeClearanceMm))})))`,
     '',
+    '# サーマルでベタにつなぐパッドの、つながるスポークの最小本数',
+    `(rule "PocketEDA サーマルのスポーク" (constraint min_resolved_spokes ${R.minThermalSpokes}))`,
+    '',
     '# 取付穴（非メッキ）と銅',
     `(rule "PocketEDA 取付穴と銅" (constraint hole_clearance (min ${mm(R.minNpthToCopperMm)}))`,
     `  (condition "A.Pad_Type == 'NPTH, mechanical' || B.Pad_Type == 'NPTH, mechanical'"))`,
@@ -362,7 +360,7 @@ export function kicadDru(project) {
 }
 
 /** フットプリントの形の比較用（名前が同じでも形が違えば別のライブラリ部品にする） */
-const fpKey = (def) => JSON.stringify([def.pads, def.body || null, def.courtyard || null]);
+const fpKey = (def) => JSON.stringify([def.pads, def.npth || null, def.body || null, def.courtyard || null]);
 
 /**
  * KiCad 一式（ZIP に入れるファイル）

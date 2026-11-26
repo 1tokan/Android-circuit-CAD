@@ -4,29 +4,10 @@
 //   sandbox の iframe・localStorage の代わり・postMessage・数の照合・ネットにつながらないときの表示を確かめる。
 //   本物の KiCanvas での読み込みは Android の実機テスト（tests/device）で確かめる。
 // ・google-chrome では sandbox の iframe の読み込みに page.route が効かないので、Playwright 同梱の Chromium を使う。
-import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
-import fs from 'node:fs';
+import { openApp, OUT } from './e2e-lib.mjs';
 import assert from 'node:assert/strict';
 
-const URL_ = process.env.URL || 'http://localhost:8765/';
-const OUT = process.env.OUT || 'tests/out';
-fs.mkdirSync(OUT, { recursive: true });
-const results = [];
-async function step(name, fn) {
-  try { await fn(); results.push(['OK', name]); console.log('OK  ', name); }
-  catch (e) { results.push(['NG', name, e.message]); console.log('NG  ', name, '\n     ', e.message.split('\n').slice(0, 6).join('\n      ')); }
-}
-const browser = await chromium.launch({ headless: true });
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-const page = await ctx.newPage();
-page.setDefaultTimeout(20000);
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(URL_);
-await page.waitForSelector('html[data-ready="1"]');
-const ws = (id) => page.locator(`#ws-nav button[data-ws="${id}"]`).click();
-const tool = (id) => page.locator(`#toolbar .tool[data-tool="${id}"]`).click();
+const { page, errors, step, ws, finish } = await openApp({ timeout: 20000, bundled: true });
 
 await step('同梱サンプルを開き、出力 → KiCad タブ', async () => {
   await page.evaluate(() => window.pocketEDA.openSample('usb-dac-amp'));
@@ -55,7 +36,7 @@ await step('KiCanvas: sandbox の中で読み直し、数を照合する（KiCan
   await page.locator('[data-kicanvas]').click();
   const status = page.locator('.kicanvas-overlay .kicanvas-status');
   await status.filter({ hasText: '読み込めました' }).waitFor({ timeout: 10000 });
-  assert.match(await status.textContent(), /部品 79・パッド 303・配線 702・ビア 319・ベタ 7 が書き出しと一致/);
+  assert.match(await status.textContent(), /部品 75・パッド 303・配線 702・ビア 319・ベタ 7 が書き出しと一致/);
   assert.equal(await page.locator('.kicanvas-overlay iframe').getAttribute('sandbox'), 'allow-scripts');
   await page.screenshot({ path: `${OUT}/output-kicanvas-phone.png` });
   await page.locator('.kicanvas-overlay [data-close]').click();
@@ -72,7 +53,4 @@ await step('コンソールエラーは、ネット切れを試したときの�
   assert.deepEqual(errors.filter((e) => !/Failed to load resource/.test(e)), []);
 });
 
-await browser.close();
-const ok = results.filter((r) => r[0] === 'OK').length;
-console.log(`\n${ok}/${results.length} passed`);
-process.exit(ok === results.length ? 0 : 1);
+await finish();

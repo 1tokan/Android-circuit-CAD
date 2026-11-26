@@ -154,9 +154,3 @@ export async function deleteParts(ids) {
   await txDone(tx);
 }
 
-export async function clearUserParts() {
-  const db = await openDB();
-  const tx = db.transaction('parts', 'readwrite');
-  tx.objectStore('parts').clear();
-  await txDone(tx);
-}

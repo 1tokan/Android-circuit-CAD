@@ -9,6 +9,7 @@
 // 電源記号: ネットごとに KiCad の電源シンボル（power・見えない power_in ピン。ピン名と値がネット名）。
 // ネットラベル: Pocket EDA のネットラベルはシート内で同名どうしがつながる → KiCad のローカルラベル（1 シートなので同じ）。
 
+import { numFmt, q, uuidFrom } from './sexpr.js';
 import { getSymbol, kindInfo } from '../schematic/symbols.js';
 import { xform } from '../schematic/geom.js';
 import { generateNetlist } from '../netlist/netlist.js';
@@ -20,19 +21,9 @@ export const KICAD_SYM_VERSION = 20220914;
 export const SYM_LIB = 'PocketEDA';
 
 const UNIT = 1.27;
-const n = (v) => { const r = Math.round(v * 1e4) / 1e4; return Object.is(r, -0) || r === 0 ? '0' : String(r); };
-const q = (s) => `"${String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+const n = numFmt(4);
 const mm = (u) => n(u * UNIT);
 
-/** 決まった UUID（同じ入力からは同じ値） */
-export function uuidFrom(str) {
-  const h = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b].map((seed) => {
-    let x = seed >>> 0;
-    for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 0x01000193) >>> 0; }
-    return x.toString(16).padStart(8, '0');
-  }).join('');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${'89ab'[parseInt(h[16], 16) & 3]}${h.slice(17, 20)}-${h.slice(20, 32)}`;
-}
 
 const PIN_TYPE = { passive: 'passive', input: 'input', output: 'output', bidirectional: 'bidirectional', power_in: 'power_in', power_out: 'power_out', open_collector: 'open_collector', nc: 'no_connect' };
 const BASE_NAME = {
@@ -275,7 +266,6 @@ export function kicadNetNames(project, built) {
     if (info.sym.isPower) continue;
     for (const p of info.pins) if (!p.nc || p.onPad) pinOfPad.set(`${c.ref}:${p.number}`, p);
   }
-  const pinLabel = (ref, p) => (p.name && p.name !== '~' ? `${ref}-${escNet(p.name)}` : `${ref}-Pad${p.number}`);
   for (const net of nl.nets) {
     let name;
     const conn = net; // { name, nodes: [{ ref, pin, pad }] }

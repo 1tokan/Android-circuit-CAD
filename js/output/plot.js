@@ -12,7 +12,7 @@
 //  { t:'region', rings:[[x,y]...], dark, fn }    … ベタ（外周は dark、穴は clear で抜く）
 // fn: X2 の .AperFunction（Conductor / SMDPad,CuDef / ComponentPad / ViaPad / Profile / NonConductor など）
 
-import { allPads, toMm, boardRect, fpToBoard, copperLayers, layerName, padHole } from '../pcb/model.js';
+import { allPads, toMm, boardRect, fpToBoard, copperLayers, layerName, padHole, boardHoles } from '../pcb/model.js';
 import { silkSegments, pin1Mark, silkTexts, cornerRadius } from '../pcb/shapes.js';
 import { SILK_LINE_MM } from '../pcb/text.js';
 import { cachedFills, ringArea } from '../pcb/zonefill.js';
@@ -29,6 +29,21 @@ const NON_COPPER = [
   { id: 'B.Paste', name: '裏 メタルマスク', ext: 'gbp', func: 'Paste,Bot', polarity: 'Positive' },
   { id: 'Edge.Cuts', name: '基板外形', ext: 'gm1', func: 'Profile,NP', polarity: 'Positive' },
 ];
+
+/** 線分を長方形で切る（Liang–Barsky）。外なら null */
+function clipToRect(r) {
+  return (a, b) => {
+    let t0 = 0, t1 = 1;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    for (const [p, q] of [[-dx, a.x - r.x0], [dx, r.x1 - a.x], [-dy, a.y - r.y0], [dy, r.y1 - a.y]]) {
+      if (p === 0) { if (q < 0) return null; continue; }
+      const t = q / p;
+      if (p < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; }
+    }
+    if (t1 - t0 < 1e-9) return null;
+    return { a: { x: a.x + t0 * dx, y: a.y + t0 * dy }, b: { x: a.x + t1 * dx, y: a.y + t1 * dy } };
+  };
+}
 
 /**
  * 層数に応じた Gerber の層の一覧。内層は JLCPCB が認識する .g1 .g2 …（表側から順）
@@ -135,14 +150,18 @@ export function buildPlot(project, pcb, opt = {}) {
     pthDrills.push({ x: at.x, y: at.y, d: toMm(v.drill), fn: 'ViaDrill' });
   }
   // ---- 取付穴（非メッキ）: レジストを開ける ----
-  const npth = pcb.holes.map((h) => ({ x: toMm(h.x), y: toMm(h.y), d: toMm(h.drill) }));
+  const npth = boardHoles(pcb).map((h) => ({ x: toMm(h.x), y: toMm(h.y), d: toMm(h.drill) }));
   for (const h of npth) for (const m of ['F.Mask', 'B.Mask']) L[m].push({ t: 'flash', ap: { kind: 'C', d: r4(h.d + 2 * mask) }, at: { x: h.x, y: h.y }, fn: 'NonConductor' });
 
   // ---- シルク ----
+  // 部品の外形線は基板の内側で切る（基板の端からはみ出すコネクタの外形線。はみ出した分は製造で削られるだけなので書かない）
+  const bb = boardRect(pcb), inset = SILK_LINE_MM / 2;
+  const clip = clipToRect({ x0: bb.x0 + inset, y0: bb.y0 + inset, x1: bb.x1 - inset, y1: bb.y1 - inset });
   for (const f of pcb.footprints) {
     const layer = f.side === 'bottom' ? 'B.SilkS' : 'F.SilkS';
     for (const s of silkSegments(f.fpDef)) {
-      L[layer].push({ t: 'line', a: fpToBoard(f, s.a.x, s.a.y), b: fpToBoard(f, s.b.x, s.b.y), w: SILK_LINE_MM, fn: 'NonConductor' });
+      const c = clip(fpToBoard(f, s.a.x, s.a.y), fpToBoard(f, s.b.x, s.b.y));
+      if (c) L[layer].push({ t: 'line', a: c.a, b: c.b, w: SILK_LINE_MM, fn: 'NonConductor' });
     }
     const m = pin1Mark(f.fpDef);
     if (m) L[layer].push({ t: 'flash', ap: { kind: 'C', d: 0.4 }, at: fpToBoard(f, m.x, m.y), fn: 'NonConductor' });

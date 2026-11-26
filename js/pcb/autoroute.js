@@ -8,7 +8,7 @@
 // - 実行前からある配線・ビアには手を付けない
 // 単位: mm（基板座標）。PCB には nm で書き込む。
 
-import { allPads, pointInPad, toMm, toNm, boardRect, copperLayers, padHole, addTrackPath, addVia } from './model.js';
+import { allPads, pointInPad, toMm, toNm, boardRect, copperLayers, padHole, addTrackPath, addVia, boardHoles } from './model.js';
 import { mergeCloseVias } from './viafix.js';
 import { DSU } from '../core/util.js';
 import { pointInRing } from '../core/geom2d.js';
@@ -118,7 +118,7 @@ export async function autoroute(pcb, rules, opt = {}) {
   }
   for (const t of pcb.tracks) paintTrack(base, t.layer, { x: toMm(t.a.x), y: toMm(t.a.y) }, { x: toMm(t.b.x), y: toMm(t.b.y) }, toMm(t.width), nid(t.net));
   for (const v of pcb.vias) paintVia(base, { x: toMm(v.x), y: toMm(v.y) }, nid(v.net), 0, toMm(v.diameter), toMm(v.drill));
-  for (const h of pcb.holes) {
+  for (const h of boardHoles(pcb)) {
     const c = { x: toMm(h.x), y: toMm(h.y) }, r = toMm(h.drill) / 2;
     for (const L of LAY) capsule(base.t[L], c, c, r + rules.minNpthToCopperMm + W / 2 + margin, BLOCK);
     capsule(base.v, c, c, r + Math.max(rules.minNpthToCopperMm + viaD / 2, rules.minHoleToHoleMm + viaH / 2) + margin, BLOCK);

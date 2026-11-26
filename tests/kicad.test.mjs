@@ -36,7 +36,7 @@ test('サンプル: .kicad_pcb の中身の数がプロジェクトと一致す�
   assert.equal(count(/^ {2}\(segment /gm), pcb.tracks.length);
   assert.equal(count(/^ {2}\(via /gm), pcb.vias.length);
   assert.equal(count(/^ {2}\(zone /gm), pcb.zones.length);
-  assert.equal(count(/^ {4}\(pad /gm), pcb.footprints.reduce((s, f) => s + f.fpDef.pads.length, 0) + pcb.holes.length);
+  assert.equal(count(/^ {4}\(pad /gm), pcb.footprints.reduce((s, f) => s + f.fpDef.pads.length + (f.fpDef.npth || []).length, 0) + pcb.holes.length);
   // 4層: 内層 2 枚
   assert.match(t, /\(1 "In1\.Cu" signal\)\n {4}\(2 "In2\.Cu" signal\)\n {4}\(31 "B\.Cu" signal\)/);
   // ネット: 全ネットが番号つきで並ぶ。配線のネット番号は表のとおり
@@ -52,6 +52,7 @@ test('サンプル: .kicad_pcb の中身の数がプロジェクトと一致す�
   assert.equal(pro.board.design_settings.rules.min_hole_to_hole, R.minSameNetHoleMm);
   assert.ok(balanced(byExt('.kicad_dru').content));
   assert.match(byExt('.kicad_dru').content, /constraint clearance \(min 0\.2mm\)/);
+  assert.match(byExt('.kicad_dru').content, /\(constraint min_resolved_spokes 2\)/, 'KiCad 7 はスポークの本数を数だけで書く（(min 2) は読めない）');
   // 同じ設計からは同じファイル（tstamp が決まった値）
   assert.equal(K.kicadFiles(prj, { version: 't' }).find((f) => f.name.endsWith('.kicad_pcb')).content, t);
 });

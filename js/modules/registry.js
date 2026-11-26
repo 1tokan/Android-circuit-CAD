@@ -14,7 +14,7 @@ export const MODULES = [
   { id: 'signal',    name: '信号経路（USB・I2S・アナログ音声）', stage: 5, status: 'ready', note: 'つながり・左右・極性・役割は汎用。設定ピン・レベル・入力インピーダンスは登録した部品（PCM5102A・TPA6132A2・MAX98357A・USBLC6）のみ。ファームウェアは対象外' },
   { id: 'gerber',    name: 'Gerber・Excellon生成',   stage: 6, status: 'ready', note: 'RS-274X X2・Excellon・ZIP。ベタの塗りつぶし（クリアランス・サーマル・島除去）を含む' },
   { id: 'bomcpl',    name: 'BOM・CPL生成',           stage: 7, status: 'ready', note: 'JLCPCB形式。回転はパッケージ補正表＋部品ごとの手動補正（プレビューで要確認）' },
-  { id: 'kicad',     name: 'KiCad 書き出し（PCB）',   stage: 7, status: 'ready', note: '.kicad_pcb（KiCad 7 形式）・設計ルール。KiCad 7.0.11 で読み込み・照合を確認。回路図は未対応' },
+  { id: 'kicad',     name: 'KiCad 書き出し',   stage: 7, status: 'ready', note: 'プロジェクト一式（.kicad_pcb・.kicad_sch・シンボル・フットプリント・簡易 3D・設計ルール）。KiCad 7.0.11 で読み込み・照合を確認。3D は簡易形状' },
 ];
 
 // 画面上の作業領域（タブ）と、そこで使うモジュール

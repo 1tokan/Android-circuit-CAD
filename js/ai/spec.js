@@ -175,7 +175,7 @@ function resolvePart(sp, library) {
  * 配置: 部品を外形の大きさに合わせて左上から並べ、各ピンの先端にネットラベル（電源・GND は電源記号）を置いて接続する。
  * @returns {{ placed, newParts, reusedParts, warnings }}
  */
-export function applySpec(project, c, { library = [] } = {}) {
+export function applySpec(project, c, { library = [], now = Date.now() } = {}) {
   const v = validateSpec(c);
   if (v.errors.length) { const e = new Error(v.errors.slice(0, 8).join('\n')); e.errors = v.errors; throw e; }
   const sheet = project.schematic.sheets[0];
@@ -225,7 +225,7 @@ export function applySpec(project, c, { library = [] } = {}) {
       part.pinMap[num] = [];
     }
   }
-  project.ai = { ...(project.ai || {}), spec: c, appliedAt: Date.now() };
+  project.ai = { ...(project.ai || {}), spec: c, appliedAt: now };
   return { placed: byRef.size, newParts, reusedParts, warnings: v.warnings };
 }
 

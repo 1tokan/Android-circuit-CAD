@@ -104,11 +104,11 @@ test('サンプル: 実装する部品はすべて LCSC 品番つき・フット
   M.zonefill.fillAllZones(pcb, M.drc.drcRules(prj));
   const unv = M.drc.runDrc(prj, pcb).issues.filter((i) => i.rule === 'footprint_unverified');
   assert.equal(unv.length, 0, unv.map((i) => i.message).join('\n'));
-  assert.equal(fp('R11').value, '390k');
+  assert.equal(fp('R10').value, '390k');
 });
 
 test('サンプル: ゲイン 3dB 設定・ジャックの ESD 保護', () => {
-  for (const [r, amp, net] of [['R16', 'U7', 'GAIN_L'], ['R17', 'U8', 'GAIN_R']]) {
+  for (const [r, amp, net] of [['R12', 'U7', 'GAIN_L'], ['R13', 'U8', 'GAIN_R']]) {
     assert.equal(fp(r).value, '100k'); assert.equal(fp(amp).padNets['2'], net); assert.ok(Object.values(fp(r).padNets).includes(net));
   }
   assert.ok(Object.values(fp('D2').padNets).includes('HP_L')); assert.ok(Object.values(fp('D3').padNets).includes('HP_R'));

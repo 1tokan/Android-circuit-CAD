@@ -1,31 +1,10 @@
 // 第6段階: ベタ塗り・Gerber 出力の実ブラウザE2Eテスト（スマホ）
 // 使い方: python3 -m http.server 8765 を起動した状態で node tests/e2e-output.mjs
-import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+import { openApp, OUT } from './e2e-lib.mjs';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
-const URL_ = process.env.URL || 'http://localhost:8765/';
-const OUT = process.env.OUT || 'tests/out';
-fs.mkdirSync(OUT, { recursive: true });
-const results = [];
-async function step(name, fn) {
-  try { await fn(); results.push(['OK', name]); console.log('OK  ', name); }
-  catch (e) { results.push(['NG', name, e.message]); console.log('NG  ', name, '\n     ', e.message.split('\n').slice(0, 6).join('\n      ')); }
-}
-const browser = await chromium.launch({
-  executablePath: '/usr/bin/google-chrome', headless: true,
-  env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
-  args: ['--no-sandbox', '--no-proxy-server', '--disable-background-networking'],
-});
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, acceptDownloads: true });
-const page = await ctx.newPage();
-page.setDefaultTimeout(8000);
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(URL_);
-await page.waitForSelector('html[data-ready="1"]');
-const ws = (id) => page.locator(`#ws-nav button[data-ws="${id}"]`).click();
+const { page, errors, step, ws, finish } = await openApp({ timeout: 8000, context: { acceptDownloads: true } });
 const tool = (id) => page.locator(`#toolbar .tool[data-tool="${id}"]`).click();
 
 // テストA を配置・配線し、裏面に GND ベタ
@@ -124,7 +103,6 @@ await step('DRCエラーがあると確認を出し、「やめる」で書き�
 
 await step('部品実装: BOM 3行・CPL 3行を表示し、CSV を書き出す', async () => {
   await page.evaluate(async () => {
-    const pm = await import('./js/pcb/model.js');
     // 前の手順で足した細い配線を消す
     window.pocketEDA.editPcb(() => {
       const b = window.pocketEDA.state.project.pcb;
@@ -182,7 +160,4 @@ await step('KiCad: タブから KiCad プロジェクト一式（回路図・PCB
 });
 
 await step('コンソールエラーなし', async () => { assert.deepEqual(errors, []); });
-await browser.close();
-const ng = results.filter((r) => r[0] === 'NG');
-console.log(`\n${results.length - ng.length}/${results.length} passed`);
-process.exit(ng.length ? 1 : 0);
+await finish();

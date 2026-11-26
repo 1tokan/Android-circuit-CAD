@@ -5,7 +5,7 @@
 // LCSC公式ではない非公式サービスなので、使えなくても設計を続けられるようにする（取得した部品は端末に保存）。
 // 送るのは検索語だけ。呼び出し間隔を空け、同じ検索は一定時間キャッシュする。
 
-import { normalizePart, normalizeLcsc, guessKind, guessFootprint, normalizeValue, pinCountFromPackage, icPinCount } from './parts.js';
+import { normalizePart, normalizeLcsc, guessKind, guessFootprint, normalizeValue, icPinCount } from './parts.js';
 import { parsePrice, valueFromDescription } from './importer.js';
 
 export const DEFAULT_BASE = 'https://jlcsearch.tscircuit.com';

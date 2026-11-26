@@ -1,7 +1,6 @@
 // PCB 要素 → 2D 形状（DRC・シルク生成で使う。単位 mm、基板座標）
-import { toMm, fpToBoard, padLayers, fpBox } from './model.js';
+import { toMm, fpToBoard, padLayers, fpBox, boardRect } from './model.js';
 import { textStrokes, strokeWidthFor, textWidth } from './text.js';
-import { boardRect } from './model.js';
 
 /** 角丸パッドの角の半径 = 短辺 × この値（画面・Gerber・3D で共通） */
 export const ROUNDRECT_RATIO = 0.25;

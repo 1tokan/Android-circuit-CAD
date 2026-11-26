@@ -1,29 +1,10 @@
 // 第4段階: PCBエディタの実ブラウザE2Eテスト（スマホのタッチ操作＋タブレットのマウス操作）
 // 使い方: python3 -m http.server 8765 を起動した状態で node tests/e2e-pcb.mjs
-import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
-import fs from 'node:fs';
+import { openApp, URL_, OUT } from './e2e-lib.mjs';
 import assert from 'node:assert/strict';
 
-const URL_ = process.env.URL || 'http://localhost:8765/';
-const OUT = process.env.OUT || 'tests/out';
-fs.mkdirSync(OUT, { recursive: true });
-const results = [];
-async function step(name, fn) {
-  try { await fn(); results.push(['OK', name]); console.log('OK  ', name); }
-  catch (e) { results.push(['NG', name, e.message]); console.log('NG  ', name, '\n     ', e.message.split('\n').slice(0, 6).join('\n      ')); }
-}
 
-const browser = await chromium.launch({
-  executablePath: '/usr/bin/google-chrome', headless: true,
-  env: { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
-  args: ['--no-sandbox', '--no-proxy-server', '--disable-background-networking'],
-});
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-const page = await ctx.newPage();
-page.setDefaultTimeout(6000);
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+const { browser, ctx, page, errors, step, ws, finish } = await openApp({ timeout: 6000, open: false });
 const cdp = await ctx.newCDPSession(page);
 await page.goto(URL_);
 await page.waitForSelector('html[data-ready="1"]');
@@ -41,7 +22,6 @@ const tapMm = async (x, y) => {
 };
 const pcb = () => page.evaluate(() => window.pocketEDA.state.project.pcb);
 const conn = () => page.evaluate(() => window.pocketEDA.state.pcbEditor.connectivity());
-const ws = (id) => page.locator(`#ws-nav button[data-ws="${id}"]`).click();
 const tool = (id) => page.locator(`#toolbar .tool[data-tool="${id}"]`).click();
 const chip = (a) => page.locator(`#ctxbar [data-pctx="${a}"]`).click();
 const padPos = (ref, num) => page.evaluate(async ([ref, num]) => {
@@ -286,7 +266,4 @@ await step('タブレット: マウスで範囲選択→Rキーで回転→Ctrl+
 
 await step('コンソールエラーなし', async () => { assert.deepEqual(errors, []); });
 
-await browser.close();
-const ng = results.filter((r) => r[0] === 'NG');
-console.log(`\n${results.length - ng.length}/${results.length} passed`);
-process.exit(ng.length ? 1 : 0);
+await finish();

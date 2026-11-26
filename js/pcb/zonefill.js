@@ -7,7 +7,7 @@
 // 座標は mm。結果の多角形は [[[x,y],...外周], [[x,y],...穴]...] の配列（polygon-clipping 形式）。
 
 import pc from '../vendor/polygon-clipping.js';
-import { allPads, toMm, boardRect, fpToBoard } from './model.js';
+import { allPads, toMm, boardRect, fpToBoard, boardHoles } from './model.js';
 import { hash } from '../netlist/netlist.js';
 import { pointInRing as inRing } from '../core/geom2d.js';
 import { withDefaults } from '../check/rules.js';
@@ -113,6 +113,7 @@ export function fillZone(pcb, z, rules = {}) {
   const obstacles = [];
   const gaps = [];
   const spokes = [];
+  const thermal = []; // サーマルでつなぐパッドと、4 本のスポークの先端（ベタにつながったかを後で数える）
   const anchors = [];
   const pads = allPads(pcb).filter((p) => p.layers.includes(z.layer));
   for (const p of pads) {
@@ -123,6 +124,9 @@ export function fillZone(pcb, z, rules = {}) {
       // スポーク: パッドの縦横方向（部品の回転に合わせる）。パッド中心を通る十字
       const L = Math.max(p.pad.w, p.pad.h) / 2 + P.thermalGap + P.spoke;
       const hw = P.spoke / 2;
+      // スポークの先端（隙間の外側、パッドの縦横 4 方向）
+      const tips = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => fpToBoard(p.inst, p.pad.x + dx * (Math.abs(dx) * p.pad.w / 2 + Math.abs(dy) * p.pad.h / 2 + P.thermalGap + P.spoke / 2), p.pad.y + dy * (Math.abs(dx) * p.pad.w / 2 + Math.abs(dy) * p.pad.h / 2 + P.thermalGap + P.spoke / 2)));
+      thermal.push({ ref: p.ref, pad: p.pad.num, x: p.x, y: p.y, tips });
       for (const [dx, dy] of [[1, 0], [0, 1]]) {
         const a = fpToBoard(p.inst, p.pad.x - dx * L, p.pad.y - dy * L);
         const b = fpToBoard(p.inst, p.pad.x + dx * L, p.pad.y + dy * L);
@@ -145,7 +149,7 @@ export function fillZone(pcb, z, rules = {}) {
     if (z.net && v.net === z.net) { anchors.push(c); continue; } // ビアはベタに直結
     obstacles.push([capsulePoly(c, c, toMm(v.diameter) / 2 + P.clearance)]);
   }
-  for (const h of pcb.holes) {
+  for (const h of boardHoles(pcb)) {
     const c = { x: toMm(h.x), y: toMm(h.y) };
     obstacles.push([capsulePoly(c, c, toMm(h.drill) / 2 + P.npth)]);
   }
@@ -165,7 +169,9 @@ export function fillZone(pcb, z, rules = {}) {
   }
   const r6 = (v) => Math.round(v * 1e5) / 1e5;
   const polygons = fill.map((poly) => poly.map((ring) => ring.map(([x, y]) => [r6(x), r6(y)])));
-  return { polygons, islandsRemoved, params: P };
+  // パッドごとの、ベタにつながったスポークの数（KiCad の「サーマルのスポーク不足」と同じ考え方。配線でのつながりは数えない）
+  const spokeCount = thermal.map((t) => ({ ref: t.ref, pad: t.pad, x: t.x, y: t.y, spokes: t.tips.filter((q) => fill.some((poly) => pointInPolyWithHoles(q, poly))).length }));
+  return { polygons, islandsRemoved, spokeCount, params: P };
 }
 
 /**
